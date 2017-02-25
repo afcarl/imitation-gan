@@ -71,7 +71,9 @@ class Critic(nn.Module):
                             1)
         actions = Variable(actions)
         inputs = self.embedding(actions)
-        outputs, _ = self.rnn(inputs)
+        outputs, _ = self.rnn(inputs,
+                              Variable(torch.zeros([1, self.opt.batch_size,
+                                                    self.opt.hidden_size]).cuda()))
         outputs = outputs.contiguous()
         flattened = outputs.view(-1, self.opt.hidden_size)
         flat_costs = self.cost(flattened)
