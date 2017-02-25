@@ -24,34 +24,35 @@ class Actor(nn.Module):
         self.cell = nn.GRUCell(opt.emb_size, opt.hidden_size)
         self.dist = nn.Linear(opt.hidden_size, opt.vocab_size)
         self.step = 0  # for eps decay
-        self.zeros = torch.LongTensor(self.opt.batch_size).zero_().cuda()
+        self.zero_input = torch.LongTensor(self.opt.batch_size).zero_().cuda()
+        self.zero_state = torch.zeros([self.opt.batch_size, self.opt.hidden_size]).cuda()
 
     def forward(self):
         outputs = []
         corrections = []
         logprobs = []
         probs = []  # for debugging
-        hidden = Variable(torch.zeros([self.opt.batch_size, self.opt.hidden_size]).cuda())
-        inputs = self.embedding(Variable(self.zeros))
+        hidden = Variable(self.zero_state)
+        inputs = self.embedding(Variable(self.zero_input))
         for out_i in xrange(self.opt.seq_len):
             hidden = self.cell(inputs, hidden)
             dist = F.log_softmax(self.dist(hidden))
-            prob = torch.exp(dist).mean(0).squeeze(0)
-            probs.append(prob.data.cpu().numpy())
-            # this has to be a clone of dist, since we modify this later but return original dist:
-            dist_new = dist.data.cpu().numpy()
+            prob = torch.exp(dist).detach()
+            probs.append(prob.mean(0).squeeze(0).data.cpu().numpy())
+            # this has to be a clone of prob, since we modify this but also use the original prob
+            prob_new = prob.data.cpu().numpy()
             # decide the current eps threshold based on the number of steps so far
             eps_threshold = self.opt.eps_end + (self.opt.eps_start - self.opt.eps_end) * \
                                                   np.exp(-4. * self.step / self.opt.eps_decay_steps)
             draw_randomly = eps_threshold >= np.random.random_sample([self.opt.batch_size])
             # set uniform (log) probability with eps_threshold probability
-            dist_new[draw_randomly, :] = -np.log(self.opt.vocab_size)
-            dist_new = Variable(torch.from_numpy(dist_new).cuda(), requires_grad=False)
+            prob_new[draw_randomly, :] = 1. / self.opt.vocab_size
+            prob_new = Variable(torch.from_numpy(prob_new).cuda(), requires_grad=False)
             # eps sampling
-            sampled = Variable(torch.multinomial(dist_new.data, 1), requires_grad=False)
+            sampled = Variable(torch.multinomial(prob_new.data, 1), requires_grad=False)
             logprob = dist.gather(1, sampled)
-            onpolicy_prob = torch.exp(logprob.detach())
-            offpolicy_prob = torch.exp(dist_new.gather(1, sampled))
+            onpolicy_prob = torch.exp(prob.gather(1, sampled))
+            offpolicy_prob = torch.exp(prob_new.gather(1, sampled))
             offpolicy_prob.data.clamp_(1e-3, 1.0)
             outputs.append(sampled)
             # use importance sampling to correct for eps sampling
@@ -73,15 +74,14 @@ class Critic(nn.Module):
         self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.hidden_size, num_layers=1,
                           batch_first=True)
         self.cost = nn.Linear(opt.hidden_size, 1)
-        self.zeros = torch.LongTensor(self.opt.batch_size, 1).zero_().cuda()
+        self.zero_input = torch.LongTensor(self.opt.batch_size, 1).zero_().cuda()
+        self.zero_state = torch.zeros([1, self.opt.batch_size, self.opt.hidden_size]).cuda()
 
     def forward(self, actions):
-        actions = torch.cat([self.zeros, actions], 1)
+        actions = torch.cat([self.zero_input, actions], 1)
         actions = Variable(actions)
         inputs = self.embedding(actions)
-        outputs, _ = self.rnn(inputs,
-                              Variable(torch.zeros([1, self.opt.batch_size,
-                                                    self.opt.hidden_size]).cuda()))
+        outputs, _ = self.rnn(inputs, Variable(self.zero_state))
         outputs = outputs.contiguous()
         flattened = outputs.view(-1, self.opt.hidden_size)
         flat_costs = self.cost(flattened)
