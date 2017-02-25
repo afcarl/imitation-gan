@@ -106,33 +106,33 @@ def weights_init(m):
 
 def get_toy_data(batch_size, seq_len, vocab_size):
     '''Generate very simple toy training data. Generates sequences of integers where a 'word' is
-       consecutive increasing integers and 1 separates words. 0 is reserved.'''
+       consecutive increasing integers and 0 separates words.'''
     batch = np.zeros([batch_size, seq_len], dtype=np.int)
-    cur_word = np.random.randint(1, vocab_size-1, size=batch_size, dtype=np.int)
-    batch[:, 0] = cur_word + 1
+    cur_word = np.random.randint(1, vocab_size, size=batch_size, dtype=np.int)
+    batch[:, 0] = cur_word
     for i in xrange(1, seq_len):
         zero_mask = cur_word == 0
         cur_word += 1
-        cur_word[cur_word > vocab_size-2] = 0
+        cur_word[cur_word > vocab_size-1] = 0
         cur_word *= np.random.binomial(np.ones(batch_size, dtype=np.int), 0.75)
-        cur_word[zero_mask] = np.random.randint(1, vocab_size-1, size=np.sum(zero_mask),
+        cur_word[zero_mask] = np.random.randint(1, vocab_size, size=np.sum(zero_mask),
                                                 dtype=np.int)
-        batch[:, i] = cur_word + 1
+        batch[:, i] = cur_word
     return batch
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--niter', type=int, default=25, help='number of epochs to train for')
+    parser.add_argument('--niter', type=int, default=3000, help='number of epochs to train for')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
     parser.add_argument('--seq_len', type=int, default=25, help='toy sequence length')
-    parser.add_argument('--vocab_size', type=int, default=10,
+    parser.add_argument('--vocab_size', type=int, default=2,
                         help='character vocab size for toy data')
-    parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
-    parser.add_argument('--hidden_size', type=int, default=256, help='RNN hidden size')
+    parser.add_argument('--emb_size', type=int, default=4, help='embedding size')
+    parser.add_argument('--hidden_size', type=int, default=32, help='RNN hidden size')
     parser.add_argument('--eps_start', type=float, default=0.9, help='initial eps for eps-greedy')
     parser.add_argument('--eps_end', type=float, default=0.05, help='final eps for eps-greedy')
-    parser.add_argument('--eps_decay_steps', type=int, default=1000,
+    parser.add_argument('--eps_decay_steps', type=int, default=800,
                         help='number of steps to exp decay over (4 for e^(-x))')
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--clamp_lower', type=float, default=-0.01)
