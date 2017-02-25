@@ -108,7 +108,7 @@ if __name__ == '__main__':
     parser.add_argument('--hidden_size', type=int, default=256, help='RNN hidden size')
     parser.add_argument('--eps_start', type=float, default=0.9, help='initial eps for eps-greedy')
     parser.add_argument('--eps_end', type=float, default=0.05, help='final eps for eps-greedy')
-    parser.add_argument('--eps_decay_steps', type=int, default=500,
+    parser.add_argument('--eps_decay_steps', type=int, default=1000,
                         help='number of steps to exp decay over (4 for e^(-x))')
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--clamp_lower', type=float, default=-0.01)
@@ -130,7 +130,12 @@ if __name__ == '__main__':
 
     for epoch in xrange(opt.niter):
         # train critic
-        for critic_i in xrange(opt.critic_iters):
+        if epoch < 25 or epoch % 500 == 0:
+            critic_iters = 100
+        else:
+            critic_iters = opt.critic_iters
+        Wdists = []
+        for critic_i in xrange(critic_iters):
             for param in critic.parameters():
                 param.data.clamp_(-1, 1)
             critic.zero_grad()
@@ -146,7 +151,7 @@ if __name__ == '__main__':
 
             critic_optimizer.step()
             Wdist = (E_generated - E_real).data[0]
-            print(Wdist)  # TODO do better logging
+            Wdists.append(Wdist)
 
         # train actor
         actor.zero_grad()
@@ -155,4 +160,8 @@ if __name__ == '__main__':
         loss = (costs * logprobs).sum() / opt.batch_size
         loss.backward()
         actor_optimizer.step()
-        print('actor step')  # TODO do better logging
+
+        if epoch % 10 == 0:
+            print(epoch, ': Wdist:', np.array(Wdists).mean())
+        if epoch % 50 == 0:
+            print(generated.cpu().numpy())
