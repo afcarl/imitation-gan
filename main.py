@@ -131,21 +131,21 @@ def get_toy_data(batch_size, seq_len, vocab_size):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--niter', type=int, default=3000, help='number of epochs to train for')
-    parser.add_argument('--batch_size', type=int, default=16, help='batch size')
-    parser.add_argument('--seq_len', type=int, default=3, help='toy sequence length')
-    parser.add_argument('--vocab_size', type=int, default=2,
+    parser.add_argument('--niter', type=int, default=100000, help='number of epochs to train for')
+    parser.add_argument('--batch_size', type=int, default=64, help='batch size')
+    parser.add_argument('--seq_len', type=int, default=15, help='toy sequence length')
+    parser.add_argument('--vocab_size', type=int, default=15,
                         help='character vocab size for toy data')
-    parser.add_argument('--emb_size', type=int, default=4, help='embedding size')
-    parser.add_argument('--hidden_size', type=int, default=16, help='RNN hidden size')
-    parser.add_argument('--eps_start', type=float, default=0.9, help='initial eps for eps-greedy')
-    parser.add_argument('--eps_end', type=float, default=0.05, help='final eps for eps-greedy')
-    parser.add_argument('--eps_decay_steps', type=int, default=800,
+    parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
+    parser.add_argument('--hidden_size', type=int, default=256, help='RNN hidden size')
+    parser.add_argument('--eps_start', type=float, default=0.95, help='initial eps for eps-greedy')
+    parser.add_argument('--eps_end', type=float, default=0.03, help='final eps for eps-greedy')
+    parser.add_argument('--eps_decay_steps', type=int, default=10000,
                         help='number of steps to exp decay over (4 for e^(-x))')
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--clamp_lower', type=float, default=-0.01)
     parser.add_argument('--clamp_upper', type=float, default=0.01)
-    parser.add_argument('--critic_iters', type=int, default=5,
+    parser.add_argument('--critic_iters', type=int, default=10,
                         help='number of critic iters per each actor iter')
     opt = parser.parse_args()
     print(opt)
@@ -168,7 +168,7 @@ if __name__ == '__main__':
         # train critic
         for param in critic.parameters():  # reset requires_grad
             param.requires_grad = True  # they are set to False below in actor update
-        if epoch < 25 or epoch % 500 == 0:
+        if epoch < 50 or epoch % 500 == 0:
             critic_iters = 100
         else:
             critic_iters = opt.critic_iters
@@ -201,10 +201,10 @@ if __name__ == '__main__':
         loss.backward(one)
         actor_optimizer.step()
 
-        if epoch % 10 == 0:
-            print(epoch, ': Wdist:', np.array(Wdists).mean())
         if epoch % 50 == 0:
+            print(epoch, ': Wdist:', np.array(Wdists).mean())
+        if epoch % 500 == 0:
             print('Generated:')
             print(generated.data.cpu().numpy(), '\n')
-            print('Batch-averaged step-wise probs:')
-            print(probs, '\n')
+            #print('Batch-averaged step-wise probs:')
+            #print(probs, '\n')
