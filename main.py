@@ -53,6 +53,7 @@ class Actor(nn.Module):
             offpolicy_prob = torch.exp(torch.from_numpy(dist_numpy).cuda().gather(1, sampled_unsq))
             offpolicy_prob.clamp_(1e-3, 1.0)
             outputs.append(sampled_unsq)
+            # use importance sampling to correct for eps sampling
             corrections.append(onpolicy_prob / Variable(offpolicy_prob))
             logprobs.append(logprob)
             if out_i < self.opt.seq_len - 1:
