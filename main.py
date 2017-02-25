@@ -30,11 +30,14 @@ class Actor(nn.Module):
         outputs = []
         corrections = []
         logprobs = []
+        probs = []  # for debugging
         hidden = Variable(torch.zeros([self.opt.batch_size, self.opt.hidden_size]).cuda())
         inputs = self.embedding(Variable(self.zeros))
         for out_i in xrange(self.opt.seq_len):
             hidden = self.cell(inputs, hidden)
             dist = F.log_softmax(self.dist(hidden))
+            prob = torch.exp(dist).mean(0).squeeze(0)
+            probs.append(prob.data.cpu().numpy())
             # this has to be a clone of dist, since we modify this later but return original dist:
             dist_new = dist.data.cpu().numpy()
             # decide the current eps threshold based on the number of steps so far
@@ -56,7 +59,8 @@ class Actor(nn.Module):
             logprobs.append(logprob)
             if out_i < self.opt.seq_len - 1:
                 inputs = self.embedding(sampled.squeeze(1))
-        return torch.cat(outputs, 1), torch.cat(corrections, 1), torch.cat(logprobs, 1)
+        return (torch.cat(outputs, 1), torch.cat(corrections, 1), torch.cat(logprobs, 1),
+                np.array(probs))
 
 
 class Critic(nn.Module):
@@ -174,7 +178,7 @@ if __name__ == '__main__':
                 param.data.clamp_(-1, 1)
             critic.zero_grad()
 
-            generated, corrections, _ = actor.forward()
+            generated, corrections, _, _ = actor.forward()
             E_generated = (critic(generated.data) * corrections).sum() / opt.batch_size
             E_generated.backward(mone)
 
@@ -191,7 +195,7 @@ if __name__ == '__main__':
         for param in critic.parameters():
             param.requires_grad = False  # to avoid computation
         actor.zero_grad()
-        generated, corrections, logprobs = actor.forward()
+        generated, corrections, logprobs, probs = actor.forward()
         actor.step += 1  # do eps decay
         loss = (critic(generated.data) * corrections * logprobs).sum() / opt.batch_size
         loss.backward(one)
@@ -200,6 +204,7 @@ if __name__ == '__main__':
         if epoch % 10 == 0:
             print(epoch, ': Wdist:', np.array(Wdists).mean())
         if epoch % 50 == 0:
-            # TODO visualize pi(a|s)
             print('Generated:')
             print(generated.data.cpu().numpy(), '\n')
+            print('Batch-averaged step-wise probs:')
+            print(probs, '\n')
