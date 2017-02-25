@@ -26,27 +26,33 @@ class Actor(nn.Module):
 
     def forward(self):
         outputs = []
+        logprobs = []
         hidden = Variable(torch.zeros([self.opt.batch_size, self.opt.hidden_size]).cuda())
         inputs = self.embedding(Variable(torch.LongTensor(self.opt.batch_size).zero_().cuda()))
         for out_i in xrange(self.opt.seq_len):
             hidden = self.cell(inputs, hidden)
-            dist = F.log_softmax(self.dist(hidden)).data.cpu().numpy()
-
+            dist = F.log_softmax(self.dist(hidden))
+            # this has to be a clone of dist, since we modify this later but return original dist:
+            dist_numpy = dist.data.cpu().numpy()
             # decide the current eps threshold based on the number of steps so far
             eps_threshold = self.opt.eps_end + (self.opt.eps_start - self.opt.eps_end) * \
                                                   np.exp(-4. * self.step / self.opt.eps_decay_steps)
             self.step += 1  # to decay eps
             draw_randomly = eps_threshold >= np.random.random_sample([self.opt.batch_size])
             # set uniform (log) probability with eps_threshold probability
-            dist[draw_randomly, :] = -np.log(self.opt.vocab_size)
+            dist_numpy[draw_randomly, :] = -np.log(self.opt.vocab_size)
 
             # for explanation of below, see https://github.com/tensorflow/tensorflow/issues/456
-            sampled = np.argmax(dist - np.log(-np.log(np.random.random_sample(dist.shape))), axis=1)
+            sampled = np.argmax(dist_numpy -
+                                np.log(-np.log(np.random.random_sample(dist_numpy.shape))), axis=1)
             sampled = torch.from_numpy(sampled).cuda()
-            outputs.append(sampled.unsqueeze(1))
+            sampled_unsq = sampled.unsqueeze(1)
+            logprob = dist.gather(1, Variable(sampled_unsq))
+            outputs.append(sampled_unsq)
+            logprobs.append(logprob)
             if out_i < self.opt.seq_len - 1:
                 inputs = self.embedding(Variable(sampled))
-        return torch.cat(outputs, 1)
+        return torch.cat(outputs, 1), torch.cat(logprobs, 1)
 
 
 class Critic(nn.Module):
@@ -69,8 +75,9 @@ class Critic(nn.Module):
         outputs = outputs.contiguous()
         flattened = outputs.view(-1, self.opt.hidden_size)
         flat_costs = self.cost(flattened)
-        cost = flat_costs.sum() / self.opt.batch_size
-        return cost
+        costs = flat_costs.view(self.opt.batch_size, -1)
+        costs = costs[:, 1:]  # ignore costs of the padded input token
+        return costs
 
 
 def get_toy_data(batch_size, seq_len, vocab_size):
@@ -118,6 +125,7 @@ if __name__ == '__main__':
     one = torch.cuda.FloatTensor([1])
     mone = one * -1
 
+    actor_optimizer = optim.RMSprop(actor.parameters(), lr=opt.learning_rate)
     critic_optimizer = optim.RMSprop(critic.parameters(), lr=opt.learning_rate)
 
     for epoch in xrange(opt.niter):
@@ -127,15 +135,24 @@ if __name__ == '__main__':
                 param.data.clamp_(-1, 1)
             critic.zero_grad()
 
-            generated = actor.forward()
-            E_generated = critic(generated)
+            generated, _ = actor.forward()
+            E_generated = critic(generated).sum() / opt.batch_size
             E_generated.backward(mone)
 
             real = torch.from_numpy(get_toy_data(opt.batch_size, opt.seq_len,
                                                  opt.vocab_size)).cuda()
-            E_real = critic(real)
+            E_real = critic(real).sum() / opt.batch_size
             E_real.backward(one)
 
             critic_optimizer.step()
             Wdist = (E_generated - E_real).data[0]
-            print(Wdist)
+            print(Wdist)  # TODO do better logging
+
+        # train actor
+        actor.zero_grad()
+        generated, logprobs = actor.forward()
+        costs = critic(generated)
+        loss = (costs * logprobs).sum() / opt.batch_size
+        loss.backward()
+        actor_optimizer.step()
+        print('actor step')  # TODO do better logging
