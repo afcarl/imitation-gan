@@ -130,6 +130,8 @@ if __name__ == '__main__':
     actor_optimizer = optim.RMSprop(actor.parameters(), lr=opt.learning_rate)
     critic_optimizer = optim.RMSprop(critic.parameters(), lr=opt.learning_rate)
 
+    print('Real examples:')
+    print(get_toy_data(opt.batch_size, opt.seq_len, opt.vocab_size), '\n')
     for epoch in xrange(opt.niter):
         # train critic
         if epoch < 25 or epoch % 500 == 0:
@@ -160,10 +162,11 @@ if __name__ == '__main__':
         generated, logprobs = actor.forward()
         costs = critic(generated)
         loss = (costs * logprobs).sum() / opt.batch_size
-        loss.backward()
+        loss.backward(one)
         actor_optimizer.step()
 
         if epoch % 10 == 0:
             print(epoch, ': Wdist:', np.array(Wdists).mean())
         if epoch % 50 == 0:
-            print(generated.cpu().numpy())
+            print('Generated:')
+            print(generated.cpu().numpy(), '\n')
