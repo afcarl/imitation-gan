@@ -27,6 +27,7 @@ class Actor(nn.Module):
 
     def forward(self):
         outputs = []
+        corrections = []
         logprobs = []
         hidden = Variable(torch.zeros([self.opt.batch_size, self.opt.hidden_size]).cuda())
         inputs = self.embedding(Variable(torch.LongTensor(self.opt.batch_size).zero_().cuda()))
@@ -48,11 +49,15 @@ class Actor(nn.Module):
             sampled = torch.from_numpy(sampled).cuda()
             sampled_unsq = sampled.unsqueeze(1)
             logprob = dist.gather(1, Variable(sampled_unsq))
+            onpolicy_prob = torch.exp(logprob.detach())
+            offpolicy_prob = torch.exp(torch.from_numpy(dist_numpy).cuda().gather(1, sampled_unsq))
+            offpolicy_prob.clamp_(1e-3, 1.0)
             outputs.append(sampled_unsq)
+            corrections.append(onpolicy_prob / Variable(offpolicy_prob))
             logprobs.append(logprob)
             if out_i < self.opt.seq_len - 1:
                 inputs = self.embedding(Variable(sampled))
-        return torch.cat(outputs, 1), torch.cat(logprobs, 1)
+        return torch.cat(outputs, 1), torch.cat(corrections, 1), torch.cat(logprobs, 1)
 
 
 class Critic(nn.Module):
@@ -170,8 +175,8 @@ if __name__ == '__main__':
                 param.data.clamp_(-1, 1)
             critic.zero_grad()
 
-            generated, _ = actor.forward()
-            E_generated = critic(generated).sum() / opt.batch_size
+            generated, corrections, _ = actor.forward()
+            E_generated = (critic(generated) * corrections).sum() / opt.batch_size
             E_generated.backward(mone)
 
             real = torch.from_numpy(get_toy_data(opt.batch_size, opt.seq_len,
@@ -187,10 +192,9 @@ if __name__ == '__main__':
         for param in critic.parameters():
             param.requires_grad = False  # to avoid computation
         actor.zero_grad()
-        generated, logprobs = actor.forward()
+        generated, corrections, logprobs = actor.forward()
         actor.step += 1  # do eps decay
-        costs = critic(generated)
-        loss = (costs * logprobs).sum() / opt.batch_size  # FIXME this is not correct
+        loss = (critic(generated) * corrections * logprobs).sum() / opt.batch_size
         loss.backward(one)
         actor_optimizer.step()
 
