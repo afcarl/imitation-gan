@@ -8,6 +8,7 @@ from six.moves import xrange
 import numpy as np
 import torch
 from torch.autograd import Variable
+import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -22,7 +23,7 @@ class Actor(nn.Module):
         self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
         self.cell = nn.GRUCell(opt.emb_size, opt.hidden_size)
         self.dist = nn.Linear(opt.hidden_size, opt.vocab_size)
-        self.step = 0
+        self.step = 0  # for eps decay
 
     def forward(self):
         outputs = []
@@ -37,7 +38,6 @@ class Actor(nn.Module):
             # decide the current eps threshold based on the number of steps so far
             eps_threshold = self.opt.eps_end + (self.opt.eps_start - self.opt.eps_end) * \
                                                   np.exp(-4. * self.step / self.opt.eps_decay_steps)
-            self.step += 1  # to decay eps
             draw_randomly = eps_threshold >= np.random.random_sample([self.opt.batch_size])
             # set uniform (log) probability with eps_threshold probability
             dist_numpy[draw_randomly, :] = -np.log(self.opt.vocab_size)
@@ -82,6 +82,28 @@ class Critic(nn.Module):
         return costs
 
 
+def weights_init(m):
+    def linear_init(weight):
+        fan_out, fan_in = weight.size()
+        weight.data.normal_(0.0, np.sqrt(2.0 / (fan_in + fan_out)))
+    if isinstance(m, nn.Linear):
+        linear_init(m.weight)
+        print('Initialized nn.Linear')
+    elif isinstance(m, nn.GRUCell):
+        linear_init(m.weight_ih)
+        linear_init(m.weight_hh)
+        print('Initialized nn.GRUCell')
+    elif isinstance(m, nn.GRU):
+        for param in m.parameters():
+            if len(param.size()) == 2:
+                linear_init(param)
+                linear_init(param)
+        print('Initialized nn.GRU')
+    elif isinstance(m, nn.Embedding):
+        m.weight.data.uniform_()
+        print('Initialized nn.Embedding')
+
+
 def get_toy_data(batch_size, seq_len, vocab_size):
     '''Generate very simple toy training data. Generates sequences of integers where a 'word' is
        consecutive increasing integers and 1 separates words. 0 is reserved.'''
@@ -118,9 +140,11 @@ if __name__ == '__main__':
     parser.add_argument('--critic_iters', type=int, default=5,
                         help='number of critic iters per each actor iter')
     opt = parser.parse_args()
+    print(opt)
+    cudnn.benchmark = True
 
-    actor = Actor(opt)
-    critic = Critic(opt)
+    actor = Actor(opt).apply(weights_init)
+    critic = Critic(opt).apply(weights_init)
     actor.cuda()
     critic.cuda()
 
@@ -130,10 +154,12 @@ if __name__ == '__main__':
     actor_optimizer = optim.RMSprop(actor.parameters(), lr=opt.learning_rate)
     critic_optimizer = optim.RMSprop(critic.parameters(), lr=opt.learning_rate)
 
-    print('Real examples:')
+    print('\nReal examples:')
     print(get_toy_data(opt.batch_size, opt.seq_len, opt.vocab_size), '\n')
     for epoch in xrange(opt.niter):
         # train critic
+        for param in critic.parameters():  # reset requires_grad
+            param.requires_grad = True  # they are set to False below in actor update
         if epoch < 25 or epoch % 500 == 0:
             critic_iters = 100
         else:
@@ -158,8 +184,11 @@ if __name__ == '__main__':
             Wdists.append(Wdist)
 
         # train actor
+        for param in critic.parameters():
+            param.requires_grad = False  # to avoid computation
         actor.zero_grad()
         generated, logprobs = actor.forward()
+        actor.step += 1  # do eps decay
         costs = critic(generated)
         loss = (costs * logprobs).sum() / opt.batch_size
         loss.backward(one)
