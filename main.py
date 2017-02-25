@@ -190,7 +190,7 @@ if __name__ == '__main__':
         generated, logprobs = actor.forward()
         actor.step += 1  # do eps decay
         costs = critic(generated)
-        loss = (costs * logprobs).sum() / opt.batch_size
+        loss = (costs * logprobs).sum() / opt.batch_size  # FIXME this is not correct
         loss.backward(one)
         actor_optimizer.step()
 
