@@ -51,8 +51,8 @@ class Actor(nn.Module):
             # eps sampling
             sampled = Variable(torch.multinomial(prob_new.data, 1), requires_grad=False)
             logprob = dist.gather(1, sampled)
-            onpolicy_prob = torch.exp(prob.gather(1, sampled))
-            offpolicy_prob = torch.exp(prob_new.gather(1, sampled))
+            onpolicy_prob = prob.gather(1, sampled)
+            offpolicy_prob = prob_new.gather(1, sampled)
             offpolicy_prob.data.clamp_(1e-3, 1.0)
             outputs.append(sampled)
             # use importance sampling to correct for eps sampling
