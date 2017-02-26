@@ -137,10 +137,9 @@ def get_toy_data_grammar(batch_size, seq_len, vocab_size):
 def get_toy_data_longterm(batch_size, seq_len, vocab_size):
     '''Generate simple toy training data where two tokens appear separated by large number
        of 0's.'''
-    assert seq_len >= 10
     batch = np.zeros([batch_size, seq_len], dtype=np.int)
-    batch[:, 4] = np.random.randint(1, vocab_size, size=batch_size, dtype=np.int)
-    batch[:, seq_len-2] = np.random.randint(1, vocab_size, size=batch_size, dtype=np.int)
+    batch[:, int(0.33 * seq_len)] = np.random.randint(1, vocab_size, size=batch_size, dtype=np.int)
+    batch[:, int(0.8 * seq_len)] = np.random.randint(1, vocab_size, size=batch_size, dtype=np.int)
     return batch
 
 
