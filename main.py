@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import argparse
 from six.moves import xrange
+import sys
 
 import numpy as np
 import torch
@@ -115,7 +116,7 @@ def weights_init(m):
         print('Initialized nn.Embedding')
 
 
-def get_toy_data_grammar(batch_size, seq_len, vocab_size):
+def get_toy_data_words(batch_size, seq_len, vocab_size):
     '''Generate very simple toy training data. Generates sequences of integers where a 'word' is
        consecutive increasing integers and 0 separates words.'''
     batch = np.zeros([batch_size, seq_len], dtype=np.int)
@@ -158,12 +159,19 @@ if __name__ == '__main__':
     parser.add_argument('--clamp_limit', type=float, default=1.0)
     parser.add_argument('--critic_iters', type=int, default=5,
                         help='number of critic iters per each actor iter')
+    parser.add_argument('--task', type=str, default='longterm', help='longterm or words')
     opt = parser.parse_args()
     print(opt)
     cudnn.benchmark = True
-    np.set_printoptions(precision=5, threshold=10000, linewidth=160, suppress=True)
+    np.set_printoptions(precision=4, threshold=10000, linewidth=200, suppress=True)
 
-    get_data = get_toy_data_longterm  # TODO make configurable
+    if opt.task == 'words':
+        get_data = get_toy_data_words
+    elif opt.task == 'longterm':
+        get_data = get_toy_data_longterm
+    else:
+        print('error: invalid task name:', opt.task)
+        sys.exit(1)
 
     actor = Actor(opt).apply(weights_init)
     critic = Critic(opt).apply(weights_init)
@@ -233,5 +241,6 @@ if __name__ == '__main__':
             print(generated.data.cpu().numpy(), '\n')
             print('Critic costs:')
             print(costs.data.cpu().numpy(), '\n')
-            print('Batch-averaged step-wise probs:')
-            print(probs, '\n')
+            if opt.task == 'longterm':
+                print('Batch-averaged step-wise probs:')
+                print(probs, '\n')
