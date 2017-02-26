@@ -38,7 +38,7 @@ class Actor(nn.Module):
             hidden = self.cell(inputs, hidden)
             dist = F.log_softmax(self.dist(hidden))
             prob = torch.exp(dist).detach()
-            probs.append(prob.mean(0).squeeze(0).data.cpu().numpy())  # for debugging
+            probs.append(prob.mean(0).cpu().squeeze(0).data.numpy())  # for debugging
             if self.eps_sample:
                 # this has to be a clone of prob, since we modify this but also use the original
                 # prob
@@ -142,7 +142,7 @@ def get_toy_data_longterm(batch_size, seq_len, vocab_size):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--niter', type=int, default=100000, help='number of epochs to train for')
-    parser.add_argument('--batch_size', type=int, default=32, help='batch size')
+    parser.add_argument('--batch_size', type=int, default=16, help='batch size')
     parser.add_argument('--seq_len', type=int, default=15, help='toy sequence length')
     parser.add_argument('--vocab_size', type=int, default=6,
                         help='character vocab size for toy data')
@@ -216,7 +216,8 @@ if __name__ == '__main__':
 
         actor.zero_grad()
         generated, corrections, logprobs, probs = actor.forward()
-        loss = (critic(generated.data) * corrections * logprobs).sum() / opt.batch_size
+        costs = critic(generated.data)
+        loss = (costs * corrections * logprobs).sum() / opt.batch_size
         loss.backward(one)
         actor_optimizer.step()
 
@@ -225,5 +226,7 @@ if __name__ == '__main__':
         if print_generated:
             print('Generated:')
             print(generated.data.cpu().numpy(), '\n')
+            print('Critic costs:')
+            print(costs.data.cpu().numpy(), '\n')
             print('Batch-averaged step-wise probs:')
             print(probs, '\n')
