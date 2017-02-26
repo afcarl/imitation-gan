@@ -23,9 +23,10 @@ class Actor(nn.Module):
         self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
         self.cell = nn.GRUCell(opt.emb_size, opt.hidden_size)
         self.dist = nn.Linear(opt.hidden_size, opt.vocab_size)
+        self.zero_input = torch.LongTensor(opt.batch_size).zero_().cuda()
+        self.zero_state = torch.zeros([opt.batch_size, opt.hidden_size]).cuda()
         self.step = 0  # for eps decay
-        self.zero_input = torch.LongTensor(self.opt.batch_size).zero_().cuda()
-        self.zero_state = torch.zeros([self.opt.batch_size, self.opt.hidden_size]).cuda()
+        self.eps_sample = True  # Do eps sampling
 
     def forward(self):
         outputs = []
@@ -38,22 +39,26 @@ class Actor(nn.Module):
             hidden = self.cell(inputs, hidden)
             dist = F.log_softmax(self.dist(hidden))
             prob = torch.exp(dist).detach()
-            probs.append(prob.mean(0).squeeze(0).data.cpu().numpy())
-            # this has to be a clone of prob, since we modify this but also use the original prob
-            prob_new = prob.data.cpu().numpy()
-            # decide the current eps threshold based on the number of steps so far
-            eps_threshold = self.opt.eps_end + (self.opt.eps_start - self.opt.eps_end) * \
+            probs.append(prob.mean(0).squeeze(0).data.cpu().numpy())  # for debugging
+            if self.eps_sample:
+                # this has to be a clone of prob, since we modify this but also use the original
+                # prob
+                prob_new = prob.data.cpu().numpy()
+                # decide the current eps threshold based on the number of steps so far
+                eps_threshold = self.opt.eps_end + (self.opt.eps_start - self.opt.eps_end) * \
                                                   np.exp(-4. * self.step / self.opt.eps_decay_steps)
-            draw_randomly = eps_threshold >= np.random.random_sample([self.opt.batch_size])
-            # set uniform distribution with eps_threshold probability
-            prob_new[draw_randomly, :] = 1. / self.opt.vocab_size
-            prob_new = Variable(torch.from_numpy(prob_new).cuda(), requires_grad=False)
+                draw_randomly = eps_threshold >= np.random.random_sample([self.opt.batch_size])
+                # set uniform distribution with eps_threshold probability
+                prob_new[draw_randomly, :] = 1. / self.opt.vocab_size
+                prob_new = Variable(torch.from_numpy(prob_new).cuda(), requires_grad=False)
+            else:
+                prob_new = prob
             # eps sampling
             sampled = Variable(torch.multinomial(prob_new.data, 1), requires_grad=False)
             logprob = dist.gather(1, sampled)
             onpolicy_prob = prob.gather(1, sampled)
             offpolicy_prob = prob_new.gather(1, sampled)
-            offpolicy_prob.data.clamp_(1e-3, 1.0)
+            offpolicy_prob.data.clamp_(1e-8, 1.0)  # avoid 0/0
             outputs.append(sampled)
             # use importance sampling to correct for eps sampling
             corrections.append(onpolicy_prob / offpolicy_prob)
@@ -74,8 +79,8 @@ class Critic(nn.Module):
         self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.hidden_size, num_layers=1,
                           batch_first=True)
         self.cost = nn.Linear(opt.hidden_size, 1)
-        self.zero_input = torch.LongTensor(self.opt.batch_size, 1).zero_().cuda()
-        self.zero_state = torch.zeros([1, self.opt.batch_size, self.opt.hidden_size]).cuda()
+        self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
+        self.zero_state = torch.zeros([1, opt.batch_size, opt.hidden_size]).cuda()
 
     def forward(self, actions):
         actions = torch.cat([self.zero_input, actions], 1)
@@ -112,7 +117,7 @@ def weights_init(m):
         print('Initialized nn.Embedding')
 
 
-def get_toy_data(batch_size, seq_len, vocab_size):
+def get_toy_data_grammar(batch_size, seq_len, vocab_size):
     '''Generate very simple toy training data. Generates sequences of integers where a 'word' is
        consecutive increasing integers and 0 separates words.'''
     batch = np.zeros([batch_size, seq_len], dtype=np.int)
@@ -129,27 +134,40 @@ def get_toy_data(batch_size, seq_len, vocab_size):
     return batch
 
 
+def get_toy_data_longterm(batch_size, seq_len, vocab_size):
+    '''Generate simple toy training data where two tokens appear separated by large number
+       of 0's.'''
+    assert seq_len >= 10
+    batch = np.zeros([batch_size, seq_len], dtype=np.int)
+    batch[:, 4] = np.random.randint(1, vocab_size, size=batch_size, dtype=np.int)
+    batch[:, seq_len-2] = np.random.randint(1, vocab_size, size=batch_size, dtype=np.int)
+    return batch
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--niter', type=int, default=100000, help='number of epochs to train for')
-    parser.add_argument('--batch_size', type=int, default=64, help='batch size')
+    parser.add_argument('--batch_size', type=int, default=32, help='batch size')
     parser.add_argument('--seq_len', type=int, default=15, help='toy sequence length')
-    parser.add_argument('--vocab_size', type=int, default=15,
+    parser.add_argument('--vocab_size', type=int, default=6,
                         help='character vocab size for toy data')
     parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
-    parser.add_argument('--hidden_size', type=int, default=256, help='RNN hidden size')
-    parser.add_argument('--eps_start', type=float, default=0.95, help='initial eps for eps-greedy')
-    parser.add_argument('--eps_end', type=float, default=0.03, help='final eps for eps-greedy')
-    parser.add_argument('--eps_decay_steps', type=int, default=10000,
+    parser.add_argument('--hidden_size', type=int, default=128, help='RNN hidden size')
+    parser.add_argument('--eps_start', type=float, default=0.9, help='initial eps for eps sampling')
+    parser.add_argument('--eps_end', type=float, default=0.05, help='final eps for eps sampling')
+    parser.add_argument('--eps_decay_steps', type=int, default=2000,
                         help='number of steps to exp decay over (4 for e^(-x))')
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--clamp_lower', type=float, default=-0.01)
     parser.add_argument('--clamp_upper', type=float, default=0.01)
-    parser.add_argument('--critic_iters', type=int, default=10,
+    parser.add_argument('--critic_iters', type=int, default=5,
                         help='number of critic iters per each actor iter')
     opt = parser.parse_args()
     print(opt)
     cudnn.benchmark = True
+    np.set_printoptions(precision=5, threshold=10000, linewidth=160, suppress=True)
+
+    get_data = get_toy_data_longterm  # TODO make configurable
 
     actor = Actor(opt).apply(weights_init)
     critic = Critic(opt).apply(weights_init)
@@ -163,12 +181,14 @@ if __name__ == '__main__':
     critic_optimizer = optim.RMSprop(critic.parameters(), lr=opt.learning_rate)
 
     print('\nReal examples:')
-    print(get_toy_data(opt.batch_size, opt.seq_len, opt.vocab_size), '\n')
+    print(get_data(opt.batch_size, opt.seq_len, opt.vocab_size), '\n')
     for epoch in xrange(opt.niter):
+        actor.eps_sample = True
+
         # train critic
         for param in critic.parameters():  # reset requires_grad
             param.requires_grad = True  # they are set to False below in actor update
-        if epoch < 50 or epoch % 500 == 0:
+        if epoch < 25 or epoch % 500 == 0:
             critic_iters = 100
         else:
             critic_iters = opt.critic_iters
@@ -178,12 +198,15 @@ if __name__ == '__main__':
                 param.data.clamp_(-1, 1)
             critic.zero_grad()
 
+            # eps sampling here can help the critic get signal from less likely actions as well.
+            # corrections will ensure that the critic doesn't have to worry about such actions
+            # too much though.
             generated, corrections, _, _ = actor.forward()
             E_generated = (critic(generated.data) * corrections).sum() / opt.batch_size
             E_generated.backward(mone)
 
-            real = torch.from_numpy(get_toy_data(opt.batch_size, opt.seq_len,
-                                                 opt.vocab_size)).cuda()
+            real = torch.from_numpy(get_data(opt.batch_size, opt.seq_len,
+                                             opt.vocab_size)).cuda()
             E_real = critic(real).sum() / opt.batch_size
             E_real.backward(one)
 
@@ -194,6 +217,12 @@ if __name__ == '__main__':
         # train actor
         for param in critic.parameters():
             param.requires_grad = False  # to avoid computation
+        if epoch % 25 == 0:
+            print_generated = True
+            actor.eps_sample = False
+        else:
+            print_generated = False
+
         actor.zero_grad()
         generated, corrections, logprobs, probs = actor.forward()
         actor.step += 1  # do eps decay
@@ -201,10 +230,10 @@ if __name__ == '__main__':
         loss.backward(one)
         actor_optimizer.step()
 
-        if epoch % 50 == 0:
+        if epoch % 25 == 0:
             print(epoch, ': Wdist:', np.array(Wdists).mean())
-        if epoch % 500 == 0:
+        if print_generated:
             print('Generated:')
             print(generated.data.cpu().numpy(), '\n')
-            #print('Batch-averaged step-wise probs:')
-            #print(probs, '\n')
+            print('Batch-averaged step-wise probs:')
+            print(probs, '\n')
