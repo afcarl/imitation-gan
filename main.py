@@ -150,8 +150,7 @@ if __name__ == '__main__':
     parser.add_argument('--hidden_size', type=int, default=128, help='RNN hidden size')
     parser.add_argument('--eps', type=float, default=0.15, help='epsilon for eps sampling')
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
-    parser.add_argument('--clamp_lower', type=float, default=-0.01)
-    parser.add_argument('--clamp_upper', type=float, default=0.01)
+    parser.add_argument('--clamp_limit', type=float, default=0.1)
     parser.add_argument('--critic_iters', type=int, default=5,
                         help='number of critic iters per each actor iter')
     opt = parser.parse_args()
@@ -187,7 +186,7 @@ if __name__ == '__main__':
         Wdists = []
         for critic_i in xrange(critic_iters):
             for param in critic.parameters():
-                param.data.clamp_(-opt.clamp_lower, opt.clamp_upper)
+                param.data.clamp_(-opt.clamp_limit, opt.clamp_limit)
             critic.zero_grad()
 
             # eps sampling here can help the critic get signal from less likely actions as well.
