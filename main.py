@@ -45,7 +45,7 @@ class Actor(nn.Module):
             eps_threshold = self.opt.eps_end + (self.opt.eps_start - self.opt.eps_end) * \
                                                   np.exp(-4. * self.step / self.opt.eps_decay_steps)
             draw_randomly = eps_threshold >= np.random.random_sample([self.opt.batch_size])
-            # set uniform (log) probability with eps_threshold probability
+            # set uniform distribution with eps_threshold probability
             prob_new[draw_randomly, :] = 1. / self.opt.vocab_size
             prob_new = Variable(torch.from_numpy(prob_new).cuda(), requires_grad=False)
             # eps sampling
