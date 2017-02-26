@@ -25,7 +25,6 @@ class Actor(nn.Module):
         self.dist = nn.Linear(opt.hidden_size, opt.vocab_size)
         self.zero_input = torch.LongTensor(opt.batch_size).zero_().cuda()
         self.zero_state = torch.zeros([opt.batch_size, opt.hidden_size]).cuda()
-        self.step = 0  # for eps decay
         self.eps_sample = True  # Do eps sampling
 
     def forward(self):
@@ -44,11 +43,8 @@ class Actor(nn.Module):
                 # this has to be a clone of prob, since we modify this but also use the original
                 # prob
                 prob_new = prob.data.cpu().numpy()
-                # decide the current eps threshold based on the number of steps so far
-                eps_threshold = self.opt.eps_end + (self.opt.eps_start - self.opt.eps_end) * \
-                                                  np.exp(-4. * self.step / self.opt.eps_decay_steps)
-                draw_randomly = eps_threshold >= np.random.random_sample([self.opt.batch_size])
-                # set uniform distribution with eps_threshold probability
+                draw_randomly = self.opt.eps >= np.random.random_sample([self.opt.batch_size])
+                # set uniform distribution with opt.eps probability
                 prob_new[draw_randomly, :] = 1. / self.opt.vocab_size
                 prob_new = Variable(torch.from_numpy(prob_new).cuda(), requires_grad=False)
             else:
@@ -152,10 +148,7 @@ if __name__ == '__main__':
                         help='character vocab size for toy data')
     parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
     parser.add_argument('--hidden_size', type=int, default=128, help='RNN hidden size')
-    parser.add_argument('--eps_start', type=float, default=0.9, help='initial eps for eps sampling')
-    parser.add_argument('--eps_end', type=float, default=0.05, help='final eps for eps sampling')
-    parser.add_argument('--eps_decay_steps', type=int, default=2000,
-                        help='number of steps to exp decay over (4 for e^(-x))')
+    parser.add_argument('--eps', type=float, default=0.15, help='epsilon for eps sampling')
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--clamp_lower', type=float, default=-0.01)
     parser.add_argument('--clamp_upper', type=float, default=0.01)
@@ -224,7 +217,6 @@ if __name__ == '__main__':
 
         actor.zero_grad()
         generated, corrections, logprobs, probs = actor.forward()
-        actor.step += 1  # do eps decay
         loss = (critic(generated.data) * corrections * logprobs).sum() / opt.batch_size
         loss.backward(one)
         actor_optimizer.step()
