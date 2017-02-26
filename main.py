@@ -187,7 +187,7 @@ if __name__ == '__main__':
         Wdists = []
         for critic_i in xrange(critic_iters):
             for param in critic.parameters():
-                param.data.clamp_(-1, 1)
+                param.data.clamp_(-opt.clamp_lower, opt.clamp_upper)
             critic.zero_grad()
 
             # eps sampling here can help the critic get signal from less likely actions as well.
