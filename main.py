@@ -54,7 +54,9 @@ class Actor(nn.Module):
             logprob = dist.gather(1, sampled)
             onpolicy_prob = prob.gather(1, sampled)
             offpolicy_prob = prob_new.gather(1, sampled)
-            offpolicy_prob.data.clamp_(1e-8, 1.0)  # avoid 0/0
+            # avoid 0/0
+            onpolicy_prob.data.clamp_(1e-8, 1.0)
+            offpolicy_prob.data.clamp_(1e-8, 1.0)
             outputs.append(sampled)
             # use importance sampling to correct for eps sampling
             corrections.append(onpolicy_prob / offpolicy_prob)
@@ -140,6 +142,9 @@ def get_toy_data_longterm(batch_size, seq_len, vocab_size):
 
 
 if __name__ == '__main__':
+    # TODO introduce discounted costs. can help the model focus on getting the first action
+    #      right before trying to deal with a long sequence of unrewarding actions based on an
+    #      incorrect early action. gamma=1 should be fine for simple tasks.
     parser = argparse.ArgumentParser()
     parser.add_argument('--niter', type=int, default=100000, help='number of epochs to train for')
     parser.add_argument('--batch_size', type=int, default=16, help='batch size')
