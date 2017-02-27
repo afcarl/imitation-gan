@@ -5,6 +5,11 @@ from __future__ import print_function
 import argparse
 from six.moves import xrange
 
+import matplotlib
+matplotlib.use('Agg') # allows for saving images without display
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+
 import numpy as np
 import torch
 from torch.autograd import Variable
@@ -12,7 +17,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-
+import os
 
 class Actor(nn.Module):
     '''The imitation GAN policy network.'''
@@ -158,8 +163,20 @@ if __name__ == '__main__':
     parser.add_argument('--clamp_limit', type=float, default=1.0)
     parser.add_argument('--critic_iters', type=int, default=5,
                         help='number of critic iters per each actor iter')
+    parser.add_argument('--name', type=str, default='default')
     opt = parser.parse_args()
     print(opt)
+
+    # some logging stuff
+    opt.save = 'logs/' + opt.name
+    if not os.path.exists(opt.save):
+        os.makedirs(opt.save)
+    train_log = open(opt.save + '/train.log', 'w')
+    colors = cm.rainbow(np.linspace(0, 1, 3))
+    plot_r = []
+    plot_f = []
+    plot_w = []
+
     cudnn.benchmark = True
     np.set_printoptions(precision=5, threshold=10000, linewidth=160, suppress=True)
 
@@ -175,6 +192,7 @@ if __name__ == '__main__':
 
     actor_optimizer = optim.RMSprop(actor.parameters(), lr=opt.learning_rate)
     critic_optimizer = optim.RMSprop(critic.parameters(), lr=opt.learning_rate)
+    #critic_optimizer = optim.SGD(critic.parameters(), lr=0.002) #opt.learning_rate)
 
     print('\nReal examples:')
     print(get_data(opt.batch_size, opt.seq_len, opt.vocab_size), '\n')
@@ -189,6 +207,8 @@ if __name__ == '__main__':
         else:
             critic_iters = opt.critic_iters
         Wdists = []
+        err_r = []
+        err_f = []
         for critic_i in xrange(critic_iters):
             for param in critic.parameters():
                 param.data.clamp_(-opt.clamp_limit, opt.clamp_limit)
@@ -209,6 +229,8 @@ if __name__ == '__main__':
             critic_optimizer.step()
             Wdist = (E_generated - E_real).data[0]
             Wdists.append(Wdist)
+            err_r.append(E_real.data[0])
+            err_f.append(E_generated.data[0])
 
         # train actor
         for param in critic.parameters():
@@ -225,10 +247,22 @@ if __name__ == '__main__':
         loss = (costs * corrections * logprobs).sum() / opt.batch_size
         loss.backward(one)
         actor_optimizer.step()
-
-        if epoch % 25 == 0:
-            print(epoch, ': Wdist:', np.array(Wdists).mean())
-        if print_generated:
+        plot_r.append(-np.array(err_r).mean())
+        plot_f.append(-np.array(err_f).mean())
+        plot_w.append(np.array(Wdists).mean())
+        if True or epoch % 25 == 0:
+            print(epoch, ':\tWdist:', np.array(Wdists).mean(), '\terr R: ', np.array(err_r).mean(), '\terr F: ', np.array(err_f).mean())
+            train_log.write('%.4f\t%.4f\t%.4f\n' % (np.array(Wdists).mean() , np.array(err_r).mean(), np.array(err_f).mean()))
+            train_log.flush()
+            fig = plt.figure()
+            x_array = np.array(range(len(plot_w)))
+            plt.plot(x_array, np.array(plot_w), c=colors[0])
+            plt.plot(x_array, np.array(plot_r), c=colors[1])
+            plt.plot(x_array, np.array(plot_f), c=colors[2])
+            plt.legend(['W dist', 'D(real)', 'D(fake)'])
+            fig.savefig(opt.save + '/train.png')
+            plt.close()
+        if epoch % 30 == 0: #print_generated:
             print('Generated:')
             print(generated.data.cpu().numpy(), '\n')
             print('Critic costs:')
