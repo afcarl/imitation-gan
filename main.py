@@ -205,7 +205,7 @@ if __name__ == '__main__':
             # eps sampling here can help the critic get signal from less likely actions as well.
             # corrections will ensure that the critic doesn't have to worry about such actions
             # too much though.
-            generated, corrections, _, _ = actor.forward()
+            generated, corrections, _, _ = actor()
             E_generated = (critic(generated.data) * corrections).sum() / opt.batch_size
             E_generated.backward(mone)
 
@@ -228,7 +228,7 @@ if __name__ == '__main__':
             print_generated = False
 
         actor.zero_grad()
-        generated, corrections, logprobs, probs = actor.forward()
+        generated, corrections, logprobs, probs = actor()
         costs = critic(generated.data)
         loss = (costs * corrections * logprobs).sum() / opt.batch_size
         loss.backward(one)
