@@ -43,26 +43,29 @@ class Actor(nn.Module):
         for out_i in xrange(self.opt.seq_len):
             hidden = self.cell(inputs, hidden)
             dist = F.log_softmax(self.dist(hidden))
-            prob = torch.exp(dist).detach()
-            probs.append(prob.mean(0).cpu().squeeze(0).data.numpy())  # for debugging
+            dist_new = dist.detach()
+            prob = torch.exp(dist_new)
+            probs.append(prob.data.mean(0).squeeze(0).cpu().numpy())  # for debugging
             if self.eps_sample:
-                # this has to be a clone of prob, since we modify this but also use the original
-                # prob
-                prob_new = prob.data.cpu().numpy()
-                draw_randomly = self.opt.eps >= np.random.random_sample([self.opt.batch_size])
+                dist_new = dist_new.clone()
+                draw_randomly = self.opt.eps >= torch.rand([self.opt.batch_size])
+                draw_randomly = draw_randomly.byte().unsqueeze(1).cuda().expand_as(dist_new)
                 # set uniform distribution with opt.eps probability
-                prob_new[draw_randomly, :] = 1. / self.opt.vocab_size
-                prob_new = Variable(torch.from_numpy(prob_new).cuda(), requires_grad=False)
-            else:
-                prob_new = prob
+                dist_new[draw_randomly] = -np.log(self.opt.vocab_size)
             # eps sampling
-            sampled = Variable(torch.multinomial(prob_new.data, 1), requires_grad=False)
+            # torch.multinomial is broken, so this is the workaround
+            _, sampled = torch.max(dist_new.data -
+                                   torch.log(-torch.log(torch.rand(*dist_new.size()).cuda())), 1)
+            sampled = Variable(sampled, requires_grad=False)
             logprob = dist.gather(1, sampled)
             onpolicy_prob = prob.gather(1, sampled)
-            offpolicy_prob = prob_new.gather(1, sampled)
+            if self.eps_sample:
+                offpolicy_prob = torch.exp(dist_new.gather(1, sampled))
+            else:
+                offpolicy_prob = onpolicy_prob
             # avoid 0/0
-            onpolicy_prob.data.clamp_(1e-8, 1.0)
-            offpolicy_prob.data.clamp_(1e-8, 1.0)
+            onpolicy_prob = onpolicy_prob.clamp(1e-8, 1.0)
+            offpolicy_prob = offpolicy_prob.clamp(1e-8, 1.0)
             outputs.append(sampled)
             # use importance sampling to correct for eps sampling
             corrections.append(onpolicy_prob / offpolicy_prob)
@@ -244,6 +247,7 @@ if __name__ == '__main__':
         for param in critic.parameters():
             param.requires_grad = False  # to avoid computation
         if epoch % 25 == 0:
+            # disable eps_sample since we intend to visualize a (noiseless) generation.
             print_generated = True
             actor.eps_sample = False
         else:
@@ -259,8 +263,10 @@ if __name__ == '__main__':
         plot_f.append(-np.array(err_f).mean())
         plot_w.append(np.array(Wdists).mean())
         if True or epoch % 25 == 0:
-            print(epoch, ':\tWdist:', np.array(Wdists).mean(), '\terr R: ', np.array(err_r).mean(), '\terr F: ', np.array(err_f).mean())
-            train_log.write('%.4f\t%.4f\t%.4f\n' % (np.array(Wdists).mean() , np.array(err_r).mean(), np.array(err_f).mean()))
+            print(epoch, ':\tWdist:', np.array(Wdists).mean(), '\terr R: ', np.array(err_r).mean(),
+                  '\terr F: ', np.array(err_f).mean())
+            train_log.write('%.4f\t%.4f\t%.4f\n' % (np.array(Wdists).mean(), np.array(err_r).mean(),
+                            np.array(err_f).mean()))
             train_log.flush()
             fig = plt.figure()
             x_array = np.array(range(len(plot_w)))
@@ -270,7 +276,7 @@ if __name__ == '__main__':
             plt.legend(['W dist', 'D(real)', 'D(fake)'])
             fig.savefig(opt.save + '/train.png')
             plt.close()
-        if epoch % 30 == 0: #print_generated:
+        if print_generated:
             print('Generated:')
             print(generated.data.cpu().numpy(), '\n')
             print('Critic costs:')
