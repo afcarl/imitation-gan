@@ -169,6 +169,10 @@ if __name__ == '__main__':
                         help='number of critic iters per each actor iter')
     parser.add_argument('--name', type=str, default='default')
     parser.add_argument('--task', type=str, default='longterm', help='longterm or words')
+    parser.add_argument('--print_every', type=int, default=25,
+                        help='print losses every these many steps')
+    parser.add_argument('--gen_every', type=int, default=25,
+                        help='generate sample every these many steps')
     opt = parser.parse_args()
     print(opt)
 
@@ -207,6 +211,7 @@ if __name__ == '__main__':
 
     print('\nReal examples:')
     print(get_data(opt.batch_size, opt.seq_len, opt.vocab_size), '\n')
+    plot_x = []
     for epoch in xrange(opt.niter):
         actor.eps_sample = True
 
@@ -246,7 +251,7 @@ if __name__ == '__main__':
         # train actor
         for param in critic.parameters():
             param.requires_grad = False  # to avoid computation
-        if epoch % 25 == 0:
+        if epoch % opt.gen_every == 0:
             # disable eps_sample since we intend to visualize a (noiseless) generation.
             print_generated = True
             actor.eps_sample = False
@@ -259,17 +264,19 @@ if __name__ == '__main__':
         loss = (costs * corrections * logprobs).sum() / opt.batch_size
         loss.backward(one)
         actor_optimizer.step()
+
+        plot_x.append(epoch)
         plot_r.append(-np.array(err_r).mean())
         plot_f.append(-np.array(err_f).mean())
         plot_w.append(np.array(Wdists).mean())
-        if True or epoch % 25 == 0:
+        if epoch % opt.print_every == 0:
             print(epoch, ':\tWdist:', np.array(Wdists).mean(), '\terr R: ', np.array(err_r).mean(),
                   '\terr F: ', np.array(err_f).mean())
             train_log.write('%.4f\t%.4f\t%.4f\n' % (np.array(Wdists).mean(), np.array(err_r).mean(),
                             np.array(err_f).mean()))
             train_log.flush()
             fig = plt.figure()
-            x_array = np.array(range(len(plot_w)))
+            x_array = np.array(plot_x)
             plt.plot(x_array, np.array(plot_w), c=colors[0])
             plt.plot(x_array, np.array(plot_r), c=colors[1])
             plt.plot(x_array, np.array(plot_f), c=colors[2])
