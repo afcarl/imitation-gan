@@ -88,6 +88,8 @@ class Critic(nn.Module):
         self.cost = nn.Linear(opt.hidden_size, 1)
         self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
         self.zero_state = torch.zeros([1, opt.batch_size, opt.hidden_size]).cuda()
+        discount = torch.cuda.FloatTensor([opt.gamma ** i for i in xrange(opt.seq_len)])
+        self.discount = discount.unsqueeze(0).expand(opt.batch_size, opt.seq_len)
 
     def forward(self, actions):
         actions = torch.cat([self.zero_input, actions], 1)
@@ -99,7 +101,7 @@ class Critic(nn.Module):
         flat_costs = self.cost(flattened)
         costs = flat_costs.view(self.opt.batch_size, -1)
         costs = costs[:, 1:]  # ignore costs of the padded input token
-        return costs
+        return costs * Variable(self.discount, requires_grad=False)
 
 
 def weights_init(m):
@@ -147,9 +149,9 @@ def get_toy_data_longterm(batch_size, seq_len, vocab_size):
 
 
 if __name__ == '__main__':
-    # TODO introduce discounted costs. can help the model focus on getting the first action
-    #      right before trying to deal with a long sequence of unrewarding actions based on an
-    #      incorrect early action. gamma=1 should be fine for simple tasks.
+    # TODO implement curriculum learning to increase gamma over time.
+    #      exponentially saturate to the final gamma value or linearly interpolate?
+    #      would it make sense to have discounted costs only for actor?
     parser = argparse.ArgumentParser()
     parser.add_argument('--niter', type=int, default=100000, help='number of epochs to train for')
     parser.add_argument('--batch_size', type=int, default=16, help='batch size')
@@ -159,6 +161,7 @@ if __name__ == '__main__':
     parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
     parser.add_argument('--hidden_size', type=int, default=128, help='RNN hidden size')
     parser.add_argument('--eps', type=float, default=0.15, help='epsilon for eps sampling')
+    parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--clamp_limit', type=float, default=1.0)
     parser.add_argument('--critic_iters', type=int, default=5,
