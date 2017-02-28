@@ -3,14 +3,12 @@ from __future__ import division
 from __future__ import print_function
 
 import argparse
-from six.moves import xrange
+import os
 import sys
 
 import matplotlib
-matplotlib.use('Agg') # allows for saving images without display
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-
 import numpy as np
 import torch
 from torch.autograd import Variable
@@ -18,7 +16,9 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import os
+
+matplotlib.use('Agg')  # allows for saving images without display
+
 
 class Actor(nn.Module):
     '''The imitation GAN policy network.'''
