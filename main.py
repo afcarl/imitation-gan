@@ -108,20 +108,16 @@ def weights_init(m):
         weight.data.normal_(0.0, np.sqrt(2.0 / (fan_in + fan_out)))
     if isinstance(m, nn.Linear):
         linear_init(m.weight)
-        print('Initialized nn.Linear')
     elif isinstance(m, nn.GRUCell):
         linear_init(m.weight_ih)
         linear_init(m.weight_hh)
-        print('Initialized nn.GRUCell')
     elif isinstance(m, nn.GRU):
         for param in m.parameters():
             if len(param.size()) == 2:
                 linear_init(param)
                 linear_init(param)
-        print('Initialized nn.GRU')
     elif isinstance(m, nn.Embedding):
         m.weight.data.uniform_()
-        print('Initialized nn.Embedding')
 
 
 def get_toy_data_words(batch_size, seq_len, vocab_size):
@@ -266,7 +262,7 @@ if __name__ == '__main__':
         actor_optimizer.step()
 
         plot_x.append(epoch)
-        plot_r.append(-np.array(err_r).mean())
+        plot_r.append(np.array(err_r).mean())
         plot_f.append(-np.array(err_f).mean())
         plot_w.append(np.array(Wdists).mean())
         if epoch % opt.print_every == 0:
