@@ -7,8 +7,10 @@ import os
 import sys
 
 import matplotlib
+matplotlib.use('Agg')  # allows for saving images without display
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+
 import numpy as np
 import torch
 from torch.autograd import Variable
@@ -17,7 +19,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-matplotlib.use('Agg')  # allows for saving images without display
 
 
 class Actor(nn.Module):
