@@ -31,7 +31,7 @@ class Actor(nn.Module):
         self.dist = nn.Linear(opt.hidden_size, opt.vocab_size)
         self.zero_input = torch.LongTensor(opt.batch_size).zero_().cuda()
         self.zero_state = torch.zeros([opt.batch_size, opt.hidden_size]).cuda()
-        self.eps_sample = True  # Do eps sampling
+        self.eps_sample = True  # do eps sampling
 
     def forward(self):
         outputs = []
@@ -262,7 +262,7 @@ if __name__ == '__main__':
         actor_optimizer.step()
 
         plot_x.append(epoch)
-        plot_r.append(np.array(err_r).mean())
+        plot_r.append(-np.array(err_r).mean())
         plot_f.append(-np.array(err_f).mean())
         plot_w.append(np.array(Wdists).mean())
         if epoch % opt.print_every == 0:
