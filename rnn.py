@@ -65,6 +65,7 @@ if __name__ == '__main__':
     parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
     parser.add_argument('--hidden_size', type=int, default=128, help='RNN hidden size')
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
+    parser.add_argument('--clamp_limit', type=float, default=-1)
     parser.add_argument('--task', type=str, default='longterm', help='longterm or words')
     parser.add_argument('--print_every', type=int, default=50,
                         help='print losses every these many steps')
@@ -93,6 +94,9 @@ if __name__ == '__main__':
     print('\nReal examples:')
     print(get_data(opt.batch_size, opt.seq_len, opt.vocab_size), '\n')
     for epoch in xrange(opt.niter):
+        if opt.clamp_limit > 0.0:
+            for param in model.parameters():
+                param.data.clamp_(-opt.clamp_limit, opt.clamp_limit)
         model.zero_grad()
         real = Variable(torch.from_numpy(get_data(opt.batch_size, opt.seq_len,
                                                   opt.vocab_size)).cuda())
