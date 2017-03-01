@@ -42,7 +42,7 @@ class RNN(nn.Module):
     def sample(self):
         outputs = []
         hidden = Variable(self.zero_state)
-        inputs = self.embedding(Variable(self.zero_input.squeeze(1)))
+        inputs = self.embedding(Variable(self.zero_input.squeeze(1), volatile=True))
         for out_i in xrange(self.opt.seq_len):
             hidden = self.cell(inputs, hidden)
             dist = F.log_softmax(self.dist(hidden))
