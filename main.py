@@ -120,7 +120,7 @@ if __name__ == '__main__':
                         help='character vocab size for toy data')
     parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
     parser.add_argument('--hidden_size', type=int, default=128, help='RNN hidden size')
-    parser.add_argument('--eps', type=float, default=0.15, help='epsilon for eps sampling')
+    parser.add_argument('--eps', type=float, default=0.0, help='epsilon for eps sampling')
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--clamp_limit', type=float, default=1.0)
@@ -172,7 +172,7 @@ if __name__ == '__main__':
     print(get_data(opt.batch_size, opt.seq_len, opt.vocab_size), '\n')
     plot_x = []
     for epoch in xrange(opt.niter):
-        actor.eps_sample = True
+        actor.eps_sample = opt.eps > 1e-8
 
         # train critic
         for param in critic.parameters():  # reset requires_grad
@@ -190,7 +190,7 @@ if __name__ == '__main__':
             critic.zero_grad()
 
             # eps sampling here can help the critic get signal from less likely actions as well.
-            # corrections will ensure that the critic doesn't have to worry about such actions
+            # corrections would ensure that the critic doesn't have to worry about such actions
             # too much though.
             generated, corrections, _, _ = actor()
             E_generated = (critic(generated.data) * corrections).sum() / opt.batch_size
@@ -238,7 +238,7 @@ if __name__ == '__main__':
                     print('Batch-averaged step-wise probs:')
                     print(probs, '\n')
                 print_generated = False
-                actor.eps_sample = True
+                actor.eps_sample = opt.eps > 1e-8
 
         plot_x.append(epoch)
         plot_r.append(-np.array(err_r).mean())
