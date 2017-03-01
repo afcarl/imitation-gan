@@ -103,7 +103,9 @@ class Critic(nn.Module):
         flat_costs = self.cost(flattened)
         costs = flat_costs.view(self.opt.batch_size, -1)
         costs = costs[:, 1:]  # ignore costs of the padded input token
-        return costs * Variable(self.discount, requires_grad=False)
+        if self.opt.gamma < 1.0:
+            costs = costs * Variable(self.discount, requires_grad=False)
+        return costs
 
 
 if __name__ == '__main__':
@@ -123,7 +125,8 @@ if __name__ == '__main__':
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--clamp_limit', type=float, default=1.0)
     parser.add_argument('--critic_iters', type=int, default=5,
-                        help='number of critic iters per each actor iter')
+                        help='number of critic iters per turn')
+    parser.add_argument('--actor_iters', type=int, default=1, help='number of actor iters per turn')
     parser.add_argument('--name', type=str, default='default')
     parser.add_argument('--task', type=str, default='longterm', help='longterm or words')
     parser.add_argument('--print_every', type=int, default=25,
@@ -207,6 +210,10 @@ if __name__ == '__main__':
         # train actor
         for param in critic.parameters():
             param.requires_grad = False  # to avoid computation
+        if epoch < 25:
+            actor_iters = 1
+        else:
+            actor_iters = opt.actor_iters
         if epoch % opt.gen_every == 0:
             # disable eps_sample since we intend to visualize a (noiseless) generation.
             print_generated = True
@@ -214,12 +221,24 @@ if __name__ == '__main__':
         else:
             print_generated = False
 
-        actor.zero_grad()
-        generated, corrections, logprobs, probs = actor()
-        costs = critic(generated.data)
-        loss = (costs * corrections * logprobs).sum() / opt.batch_size
-        loss.backward(one)
-        actor_optimizer.step()
+        for actor_i in xrange(actor_iters):
+            actor.zero_grad()
+            generated, corrections, logprobs, probs = actor()
+            costs = critic(generated.data)
+            loss = (costs * corrections * logprobs).sum() / opt.batch_size
+            loss.backward(one)
+            actor_optimizer.step()
+            if print_generated:
+                # print generated only in the first actor iteration
+                print('Generated:')
+                print(generated.data.cpu().numpy(), '\n')
+                print('Critic costs:')
+                print(costs.data.cpu().numpy(), '\n')
+                if opt.task == 'longterm':
+                    print('Batch-averaged step-wise probs:')
+                    print(probs, '\n')
+                print_generated = False
+                actor.eps_sample = True
 
         plot_x.append(epoch)
         plot_r.append(-np.array(err_r).mean())
@@ -239,11 +258,3 @@ if __name__ == '__main__':
             plt.legend(['W dist', 'D(real)', 'D(fake)'])
             fig.savefig(opt.save + '/train.png')
             plt.close()
-        if print_generated:
-            print('Generated:')
-            print(generated.data.cpu().numpy(), '\n')
-            print('Critic costs:')
-            print(costs.data.cpu().numpy(), '\n')
-            if opt.task == 'longterm':
-                print('Batch-averaged step-wise probs:')
-                print(probs, '\n')
