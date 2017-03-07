@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import argparse
 import os
+from six.moves import xrange
 import sys
 
 import matplotlib

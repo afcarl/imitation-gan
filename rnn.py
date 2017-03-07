@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import argparse
+from six.moves import xrange
 import sys
 
 import numpy as np
