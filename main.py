@@ -90,8 +90,7 @@ class Critic(nn.Module):
         self.cost = nn.Linear(opt.hidden_size, 1)
         self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
         self.zero_state = torch.zeros([1, opt.batch_size, opt.hidden_size]).cuda()
-        discount = torch.cuda.FloatTensor([opt.gamma ** i for i in xrange(opt.seq_len)])
-        self.discount = discount.unsqueeze(0).expand(opt.batch_size, opt.seq_len)
+        self.gamma = opt.gamma
 
     def forward(self, actions):
         actions = torch.cat([self.zero_input, actions], 1)
@@ -103,15 +102,14 @@ class Critic(nn.Module):
         flat_costs = self.cost(flattened)
         costs = flat_costs.view(self.opt.batch_size, -1)
         costs = costs[:, 1:]  # ignore costs of the padded input token
-        if self.opt.gamma < 1.0:
-            costs = costs * Variable(self.discount, requires_grad=False)
+        if self.gamma < 1.0 - 1e-8:
+            discount = torch.cuda.FloatTensor([self.gamma ** i for i in xrange(opt.seq_len)])
+            discount = discount.unsqueeze(0).expand(opt.batch_size, opt.seq_len)
+            costs = costs * Variable(discount, requires_grad=False)
         return costs
 
 
 if __name__ == '__main__':
-    # TODO implement curriculum learning to increase gamma over time.
-    #      exponentially saturate to the final gamma value or linearly interpolate?
-    #      would it make sense to have discounted costs only for actor?
     parser = argparse.ArgumentParser()
     parser.add_argument('--niter', type=int, default=100000, help='number of epochs to train for')
     parser.add_argument('--batch_size', type=int, default=16, help='batch size')
@@ -122,6 +120,8 @@ if __name__ == '__main__':
     parser.add_argument('--hidden_size', type=int, default=128, help='RNN hidden size')
     parser.add_argument('--eps', type=float, default=0.0, help='epsilon for eps sampling')
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
+    parser.add_argument('--gamma_inc', type=float, default=0.0,
+                        help='the amount by which to increase gamma at each turn')
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--clamp_limit', type=float, default=1.0)
     parser.add_argument('--critic_iters', type=int, default=5,
@@ -157,8 +157,8 @@ if __name__ == '__main__':
         print('error: invalid task name:', opt.task)
         sys.exit(1)
 
-    actor = Actor(opt).apply(util.weights_init)
-    critic = Critic(opt).apply(util.weights_init)
+    actor = Actor(opt)  #.apply(util.weights_init)
+    critic = Critic(opt)  #.apply(util.weights_init)
     actor.cuda()
     critic.cuda()
 
@@ -239,6 +239,7 @@ if __name__ == '__main__':
                     print(probs, '\n')
                 print_generated = False
                 actor.eps_sample = opt.eps > 1e-8
+        critic.gamma = min(critic.gamma + opt.gamma_inc, 1.0)
 
         plot_x.append(epoch)
         plot_r.append(-np.array(err_r).mean())
@@ -246,7 +247,7 @@ if __name__ == '__main__':
         plot_w.append(np.array(Wdists).mean())
         if epoch % opt.print_every == 0:
             print(epoch, ':\tWdist:', np.array(Wdists).mean(), '\terr R: ', np.array(err_r).mean(),
-                  '\terr F: ', np.array(err_f).mean())
+                  '\terr F: ', np.array(err_f).mean(), '\t gamma: ', critic.gamma)
             train_log.write('%.4f\t%.4f\t%.4f\n' % (np.array(Wdists).mean(), np.array(err_r).mean(),
                             np.array(err_f).mean()))
             train_log.flush()
