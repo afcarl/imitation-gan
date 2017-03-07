@@ -15,7 +15,7 @@ from main import Critic
 import util
 
 
-def get_fake_toy_data_words(batch_size, seq_len, vocab_size, strategy='real'):
+def get_fake_toy_data_words(batch_size, seq_len, vocab_size, strategy):
     batch = np.zeros([batch_size, seq_len], dtype=np.int)
     if strategy == 'real':  # TODO more strategies
         cur_word = np.random.randint(1, vocab_size, size=batch_size, dtype=np.int)
@@ -31,7 +31,7 @@ def get_fake_toy_data_words(batch_size, seq_len, vocab_size, strategy='real'):
         return batch
 
 
-def get_fake_toy_data_longterm(batch_size, seq_len, vocab_size, strategy='real'):
+def get_fake_toy_data_longterm(batch_size, seq_len, vocab_size, strategy):
     batch = np.zeros([batch_size, seq_len], dtype=np.int)
     if strategy == 'zeros':
         return batch
@@ -42,12 +42,11 @@ def get_fake_toy_data_longterm(batch_size, seq_len, vocab_size, strategy='real')
                                                          dtype=np.int)
         return batch
     elif strategy == 'close':
-        r1 = max(min(np.random.normal(loc=0.33, scale=0.01), 0.999), 0.0)
-        batch[:, int(r1 * seq_len)] = np.random.randint(1, vocab_size, size=batch_size,
-                                                          dtype=np.int)
-        r2 = max(min(np.random.normal(loc=0.8, scale=1e-3), 0.999), 0.0)
-        batch[:, int(r2 * seq_len)] = np.random.randint(1, vocab_size, size=batch_size,
-                                                         dtype=np.int)
+        for i in xrange(batch_size):
+            r1 = max(min(np.random.normal(loc=0.33, scale=0.001), 0.999), 0.0)
+            batch[i, int(r1 * seq_len)] = np.random.randint(1, vocab_size, dtype=np.int)
+            r2 = max(min(np.random.normal(loc=0.8, scale=0.001), 0.999), 0.0)
+            batch[i, int(r2 * seq_len)] = np.random.randint(1, vocab_size, dtype=np.int)
         return batch
     elif strategy == 'random':
         batch = np.random.randint(1, vocab_size, size=batch.shape, dtype=np.int)
@@ -68,8 +67,8 @@ if __name__ == '__main__':
     parser.add_argument('--critic_iters', type=int, default=5,
                         help='number of critic iters per turn')
     parser.add_argument('--task', type=str, default='longterm', help='longterm or words')
-    parser.add_argument('--strategy', type=str, default='real', help='fake data strategy')
-    parser.add_argument('--print_every', type=int, default=500,
+    parser.add_argument('--strategy', type=str, default='close', help='fake data strategy')
+    parser.add_argument('--print_every', type=int, default=25,
                         help='print losses every these many steps')
     opt = parser.parse_args()
     opt.gamma = 1.0
@@ -104,8 +103,8 @@ if __name__ == '__main__':
             param.data.clamp_(-opt.clamp_limit, opt.clamp_limit)
         critic.zero_grad()
 
-        fake = torch.from_numpy(get_fake_data(opt.batch_size, opt.seq_len,
-                                              opt.vocab_size, strategy=opt.strategy)).cuda()
+        fake = torch.from_numpy(get_fake_data(opt.batch_size, opt.seq_len, opt.vocab_size,
+                                              opt.strategy)).cuda()
         E_generated = critic(fake).sum() / opt.batch_size
         E_generated.backward(mone)
 

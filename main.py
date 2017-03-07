@@ -225,6 +225,10 @@ if __name__ == '__main__':
         for actor_i in xrange(actor_iters):
             actor.zero_grad()
             generated, corrections, logprobs, probs = actor()
+            if print_generated:
+                generated.data[-1].copy_(torch.from_numpy(get_data(1, opt.seq_len,
+                                                                   opt.vocab_size)).cuda())
+                corrections[-1].data.zero_()
             costs = critic(generated.data)
             loss = (costs * corrections * logprobs).sum() / opt.batch_size
             loss.backward(one)
