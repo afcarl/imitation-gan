@@ -126,8 +126,11 @@ if __name__ == '__main__':
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--gamma_inc', type=float, default=0.0,
                         help='the amount by which to increase gamma at each turn')
-    parser.add_argument('--entropy_reg', type=float, default=0.0,
+    parser.add_argument('--entropy_reg', type=float, default=1.0,
                         help='policy entropy regularization')  # 1e-2 for A3C
+    parser.add_argument('--reward_reg', type=float, default=1.0,
+                        help='critic reward regularization')
+    parser.add_argument('--reward_reg_norm', type=int, default=2)
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--max_grad_norm', type=float, default=1.0,
                         help='norm for gradient clipping')
@@ -170,9 +173,6 @@ if __name__ == '__main__':
     actor.cuda()
     critic.cuda()
 
-    one = torch.cuda.FloatTensor([1])
-    mone = one * -1
-
     actor_optimizer = optim.RMSprop(actor.parameters(), lr=opt.learning_rate)
     critic_optimizer = optim.RMSprop(critic.parameters(), lr=opt.learning_rate)
 
@@ -193,21 +193,27 @@ if __name__ == '__main__':
         err_r = []
         err_f = []
         for critic_i in xrange(critic_iters):
-            for param in critic.parameters():
-                param.data.clamp_(-opt.clamp_limit, opt.clamp_limit)
+            # XXX is this necessary if we have reward regularization?
+            #for param in critic.parameters():
+            #    param.data.clamp_(-opt.clamp_limit, opt.clamp_limit)
             critic.zero_grad()
 
             # eps sampling here can help the critic get signal from less likely actions as well.
             # corrections would ensure that the critic doesn't have to worry about such actions
             # too much though.
             generated, corrections, _, _, _ = actor()
-            E_generated = (critic(generated.data) * corrections).sum() / opt.batch_size
-            E_generated.backward(mone)
+            costs = critic(generated.data) * corrections
+            E_generated = costs.sum() / opt.batch_size
+            gen_loss = -E_generated + \
+                       opt.reward_reg * costs.norm(opt.reward_reg_norm) / opt.batch_size
+            gen_loss.backward()
 
             real = torch.from_numpy(get_data(opt.batch_size, opt.seq_len,
                                              opt.vocab_size)).cuda()
-            E_real = critic(real).sum() / opt.batch_size
-            E_real.backward(one)
+            costs = critic(real)
+            E_real = costs.sum() / opt.batch_size
+            real_loss = E_real + opt.reward_reg * costs.norm(opt.reward_reg_norm) / opt.batch_size
+            real_loss.backward()
 
             nnutils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
             critic_optimizer.step()
@@ -243,7 +249,7 @@ if __name__ == '__main__':
             all_probs = torch.exp(all_logprobs)
             entropy = -(all_probs * all_logprobs).sum() / opt.batch_size
             loss -= opt.entropy_reg * entropy
-            loss.backward(one)
+            loss.backward()
             nnutils.clip_grad_norm(actor.parameters(), opt.max_grad_norm)
             actor_optimizer.step()
             if print_generated:
@@ -252,6 +258,8 @@ if __name__ == '__main__':
                 print(generated.data.cpu().numpy(), '\n')
                 print('Critic costs:')
                 print(costs.data.cpu().numpy(), '\n')
+                print('Critic cost sums:')
+                print(costs.data.cpu().numpy().sum(1), '\n')
                 if opt.task == 'longterm':
                     print('Batch-averaged step-wise probs:')
                     print(avgprobs, '\n')
