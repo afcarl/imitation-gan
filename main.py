@@ -18,6 +18,7 @@ from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.utils as nnutils  # remove after updating pytorch
 import torch.optim as optim
 
 import util
@@ -40,12 +41,14 @@ class Actor(nn.Module):
         outputs = []
         corrections = []
         logprobs = []
+        dists = []
         probs = []  # for debugging
         hidden = Variable(self.zero_state)
         inputs = self.embedding(Variable(self.zero_input))
         for out_i in xrange(self.opt.seq_len):
             hidden = self.cell(inputs, hidden)
             dist = F.log_softmax(self.dist(hidden))
+            dists.append(dist.unsqueeze(1))
             dist_new = dist.detach()
             prob = torch.exp(dist_new)
             probs.append(prob.data.mean(0).squeeze(0).cpu().numpy())  # for debugging
@@ -76,7 +79,7 @@ class Actor(nn.Module):
             if out_i < self.opt.seq_len - 1:
                 inputs = self.embedding(sampled.squeeze(1))
         return (torch.cat(outputs, 1), torch.cat(corrections, 1), torch.cat(logprobs, 1),
-                np.array(probs))
+                torch.cat(dists, 1), np.array(probs))
 
 
 class Critic(nn.Module):
@@ -123,7 +126,11 @@ if __name__ == '__main__':
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--gamma_inc', type=float, default=0.0,
                         help='the amount by which to increase gamma at each turn')
+    parser.add_argument('--entropy_reg', type=float, default=0.0,
+                        help='policy entropy regularization')  # 1e-2 for A3C
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
+    parser.add_argument('--max_grad_norm', type=float, default=1.0,
+                        help='norm for gradient clipping')
     parser.add_argument('--clamp_limit', type=float, default=1.0)
     parser.add_argument('--critic_iters', type=int, default=5,
                         help='number of critic iters per turn')
@@ -193,7 +200,7 @@ if __name__ == '__main__':
             # eps sampling here can help the critic get signal from less likely actions as well.
             # corrections would ensure that the critic doesn't have to worry about such actions
             # too much though.
-            generated, corrections, _, _ = actor()
+            generated, corrections, _, _, _ = actor()
             E_generated = (critic(generated.data) * corrections).sum() / opt.batch_size
             E_generated.backward(mone)
 
@@ -202,6 +209,7 @@ if __name__ == '__main__':
             E_real = critic(real).sum() / opt.batch_size
             E_real.backward(one)
 
+            nnutils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
             critic_optimizer.step()
             Wdist = (E_generated - E_real).data[0]
             Wdists.append(Wdist)
@@ -224,14 +232,19 @@ if __name__ == '__main__':
 
         for actor_i in xrange(actor_iters):
             actor.zero_grad()
-            generated, corrections, logprobs, probs = actor()
+            generated, corrections, logprobs, all_logprobs, avgprobs = actor()
             if print_generated:
                 generated.data[-1].copy_(torch.from_numpy(get_data(1, opt.seq_len,
                                                                    opt.vocab_size)).cuda())
                 corrections[-1].data.zero_()
+                all_logprobs = all_logprobs[:-1]
             costs = critic(generated.data)
             loss = (costs * corrections * logprobs).sum() / opt.batch_size
+            all_probs = torch.exp(all_logprobs)
+            entropy = -(all_probs * all_logprobs).sum() / opt.batch_size
+            loss -= opt.entropy_reg * entropy
             loss.backward(one)
+            nnutils.clip_grad_norm(actor.parameters(), opt.max_grad_norm)
             actor_optimizer.step()
             if print_generated:
                 # print generated only in the first actor iteration
@@ -241,7 +254,7 @@ if __name__ == '__main__':
                 print(costs.data.cpu().numpy(), '\n')
                 if opt.task == 'longterm':
                     print('Batch-averaged step-wise probs:')
-                    print(probs, '\n')
+                    print(avgprobs, '\n')
                 print_generated = False
                 actor.eps_sample = opt.eps > 1e-8
         critic.gamma = min(critic.gamma + opt.gamma_inc, 1.0)
