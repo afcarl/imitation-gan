@@ -91,25 +91,32 @@ class Critic(nn.Module):
         self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
         self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.hidden_size, num_layers=1,
                           batch_first=True)
-        self.cost = nn.Linear(opt.hidden_size, 1)
+        self.cost = nn.Linear(opt.hidden_size, opt.vocab_size)
         self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
         self.zero_state = torch.zeros([1, opt.batch_size, opt.hidden_size]).cuda()
         self.gamma = opt.gamma
 
     def forward(self, actions):
-        actions = torch.cat([self.zero_input, actions], 1)
-        actions = Variable(actions)
-        inputs = self.embedding(actions)
+        actions = Variable(actions, requires_grad=False)
+        padded_actions = torch.cat([Variable(self.zero_input, requires_grad=False), actions], 1)
+        inputs = self.embedding(padded_actions)
         outputs, _ = self.rnn(inputs, Variable(self.zero_state))
         outputs = outputs.contiguous()
         flattened = outputs.view(-1, self.opt.hidden_size)
         flat_costs = self.cost(flattened)
-        costs = flat_costs.view(self.opt.batch_size, -1)
-        costs = costs[:, 1:]  # ignore costs of the padded input token
+        if self.opt.normalize_rewards:
+            # XXX perhaps do this only during actor training?
+            # subtract mean to reduce variance. consider the mean to be a constant, and don't
+            # backprop through it
+            flat_costs -= flat_costs.mean(1).expand_as(flat_costs).detach()
+        costs = flat_costs.view(self.opt.batch_size, self.opt.seq_len + 1, self.opt.vocab_size)
+        costs = costs[:, :-1]  # account for the padding
+        costs = costs.gather(2, actions.unsqueeze(2)).squeeze(2)
         if self.gamma < 1.0 - 1e-8:
-            discount = torch.cuda.FloatTensor([self.gamma ** i for i in xrange(opt.seq_len)])
-            discount = discount.unsqueeze(0).expand(opt.batch_size, opt.seq_len)
-            costs = costs * Variable(discount, requires_grad=False)
+            discount = torch.cuda.FloatTensor([self.gamma ** i for i in xrange(self.opt.seq_len)])
+            discount = discount.unsqueeze(0).expand(self.opt.batch_size, self.opt.seq_len)
+            discount = Variable(discount, requires_grad=False)
+            costs = costs * discount
         return costs
 
 
@@ -127,14 +134,16 @@ if __name__ == '__main__':
     parser.add_argument('--gamma_inc', type=float, default=0.0,
                         help='the amount by which to increase gamma at each turn')
     parser.add_argument('--entropy_reg', type=float, default=1.0,
-                        help='policy entropy regularization')  # 1e-2 for A3C
-    parser.add_argument('--reward_reg', type=float, default=1.0,
+                        help='policy entropy regularization')
+    parser.add_argument('--reward_reg', type=float, default=0.0,
                         help='critic reward regularization')
     parser.add_argument('--reward_reg_norm', type=int, default=2)
+    parser.add_argument('--normalize_rewards', type=int, default=1)
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--max_grad_norm', type=float, default=1.0,
                         help='norm for gradient clipping')
-    parser.add_argument('--clamp_limit', type=float, default=1.0)
+    parser.add_argument('--clamp_limit', type=float, default=1.0,
+                        help='critic param clamping. -1 to disable')
     parser.add_argument('--critic_iters', type=int, default=5,
                         help='number of critic iters per turn')
     parser.add_argument('--actor_iters', type=int, default=1, help='number of actor iters per turn')
@@ -193,9 +202,9 @@ if __name__ == '__main__':
         err_r = []
         err_f = []
         for critic_i in xrange(critic_iters):
-            # XXX is this necessary if we have reward regularization?
-            #for param in critic.parameters():
-            #    param.data.clamp_(-opt.clamp_limit, opt.clamp_limit)
+            if opt.clamp_limit > 0:
+                for param in critic.parameters():
+                    param.data.clamp_(-opt.clamp_limit, opt.clamp_limit)
             critic.zero_grad()
 
             # eps sampling here can help the critic get signal from less likely actions as well.
