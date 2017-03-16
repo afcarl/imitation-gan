@@ -101,4 +101,19 @@ class LongtermTask(Task):
         return batch
 
     def solved(self, avgprobs):
-        return False
+        # avgprobs size: (seq_len, vocab_size)
+        assert avgprobs.shape[0] == self.seq_len
+        indices = set([int(0.33 * self.seq_len), int(0.8 * self.seq_len)])
+        for i in xrange(self.seq_len):
+            probs = avgprobs[i]
+            if i in indices:
+                if probs[0] > 0.05:
+                    return False
+                meanprob = 1 / (self.vocab_size - 1)
+                for j in xrange(1, self.vocab_size):
+                    if np.abs(probs[j] - meanprob) > 0.01 * (self.vocab_size - 1):
+                        return False
+            else:
+                if probs[0] < 0.95:
+                    return False
+        return True
