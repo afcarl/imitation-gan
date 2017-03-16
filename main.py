@@ -139,6 +139,7 @@ if __name__ == '__main__':
                         help='critic reward regularization')
     parser.add_argument('--reward_reg_norm', type=int, default=2)
     parser.add_argument('--normalize_rewards', type=int, default=1)
+    parser.add_argument('--replay_size', type=int, default=2000)
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--max_grad_norm', type=float, default=1.0,
                         help='norm for gradient clipping')
@@ -182,6 +183,9 @@ if __name__ == '__main__':
     actor.cuda()
     critic.cuda()
 
+    assert opt.replay_size >= opt.batch_size
+    buffer = util.ReplayMemory(opt.replay_size)
+
     actor_optimizer = optim.RMSprop(actor.parameters(), lr=opt.learning_rate)
     critic_optimizer = optim.RMSprop(critic.parameters(), lr=opt.learning_rate)
 
@@ -211,7 +215,11 @@ if __name__ == '__main__':
             # corrections would ensure that the critic doesn't have to worry about such actions
             # too much though.
             generated, corrections, _, _, _ = actor()
-            costs, _ = critic(generated.data)
+            buffer.push(generated.data.cpu().numpy(), corrections.data.cpu().numpy())
+            generated, corrections = buffer.sample(opt.batch_size)
+            generated = torch.from_numpy(generated).cuda()
+            corrections = Variable(torch.from_numpy(corrections).cuda(), requires_grad=False)
+            costs, _ = critic(generated)
             costs = costs * corrections
             E_generated = costs.sum() / opt.batch_size
             gen_loss = -E_generated + \

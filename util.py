@@ -2,10 +2,36 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import random
 from six.moves import xrange
 
 import numpy as np
 import torch.nn as nn
+
+
+class ReplayMemory(object):
+
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.memory = []
+        self.position = 0
+
+    def push(self, generations, corrections):
+        for i in xrange(generations.shape[0]):
+            self._push(generations[i], corrections[i])
+
+    def _push(self, generation, correction):
+        if len(self.memory) < self.capacity:
+            self.memory.append(None)
+        self.memory[self.position] = (generation, correction)
+        self.position = (self.position + 1) % self.capacity
+
+    def sample(self, batch_size):
+        generations, corrections = zip(*random.sample(self.memory, batch_size))
+        return np.array(generations), np.array(corrections)
+
+    def __len__(self):
+        return len(self.memory)
 
 
 def weights_init(m):
