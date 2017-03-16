@@ -122,7 +122,7 @@ class Critic(nn.Module):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--niter', type=int, default=100000, help='number of epochs to train for')
+    parser.add_argument('--niter', type=int, default=1000000, help='number of epochs to train for')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
     parser.add_argument('--seq_len', type=int, default=15, help='toy sequence length')
     parser.add_argument('--vocab_size', type=int, default=6,
