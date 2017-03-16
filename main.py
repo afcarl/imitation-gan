@@ -123,7 +123,7 @@ class Critic(nn.Module):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--niter', type=int, default=100000, help='number of epochs to train for')
-    parser.add_argument('--batch_size', type=int, default=16, help='batch size')
+    parser.add_argument('--batch_size', type=int, default=32, help='batch size')
     parser.add_argument('--seq_len', type=int, default=15, help='toy sequence length')
     parser.add_argument('--vocab_size', type=int, default=6,
                         help='character vocab size for toy data')
@@ -139,7 +139,7 @@ if __name__ == '__main__':
                         help='critic reward regularization')
     parser.add_argument('--reward_reg_norm', type=int, default=2)
     parser.add_argument('--normalize_rewards', type=int, default=1)
-    parser.add_argument('--replay_size', type=int, default=2000)
+    parser.add_argument('--replay_size', type=int, default=8000)
     parser.add_argument('--solved_threshold', type=int, default=25,
                         help='conseq steps the task (if appl) has been solved for before exit')
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
@@ -147,9 +147,10 @@ if __name__ == '__main__':
                         help='norm for gradient clipping')
     parser.add_argument('--clamp_limit', type=float, default=-1,
                         help='critic param clamping. -1 to disable')
-    parser.add_argument('--critic_iters', type=int, default=5,
+    parser.add_argument('--critic_iters', type=int, default=15,
                         help='number of critic iters per turn')
-    parser.add_argument('--actor_iters', type=int, default=1, help='number of actor iters per turn')
+    parser.add_argument('--actor_iters', type=int, default=10,
+                        help='number of actor iters per turn')
     parser.add_argument('--name', type=str, default='default')
     parser.add_argument('--task', type=str, default='longterm', help='longterm or words')
     parser.add_argument('--print_every', type=int, default=25,
