@@ -140,6 +140,8 @@ if __name__ == '__main__':
     parser.add_argument('--reward_reg_norm', type=int, default=2)
     parser.add_argument('--normalize_rewards', type=int, default=1)
     parser.add_argument('--replay_size', type=int, default=2000)
+    parser.add_argument('--solved_threshold', type=int, default=25,
+                        help='conseq steps the task (if appl) has been solved for before exit')
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--max_grad_norm', type=float, default=1.0,
                         help='norm for gradient clipping')
@@ -171,9 +173,9 @@ if __name__ == '__main__':
     np.set_printoptions(precision=4, threshold=10000, linewidth=200, suppress=True)
 
     if opt.task == 'words':
-        get_data = util.get_toy_data_words
+        task = util.WordsTask(opt.seq_len, opt.vocab_size)
     elif opt.task == 'longterm':
-        get_data = util.get_toy_data_longterm
+        task = util.LongtermTask(opt.seq_len, opt.vocab_size)
     else:
         print('error: invalid task name:', opt.task)
         sys.exit(1)
@@ -189,10 +191,15 @@ if __name__ == '__main__':
     actor_optimizer = optim.RMSprop(actor.parameters(), lr=opt.learning_rate)
     critic_optimizer = optim.RMSprop(critic.parameters(), lr=opt.learning_rate)
 
+    solved = 0
+
     print('\nReal examples:')
-    print(get_data(opt.batch_size, opt.seq_len, opt.vocab_size), '\n')
+    print(task.get_data(opt.batch_size), '\n')
     plot_x = []
     for epoch in xrange(opt.niter):
+        if solved >= opt.solved_threshold:
+            print('%d: Task solved, exiting.' % epoch)
+            break
         actor.eps_sample = opt.eps > 1e-8
 
         # train critic
@@ -226,8 +233,7 @@ if __name__ == '__main__':
                        opt.reward_reg * costs.norm(opt.reward_reg_norm) / opt.batch_size
             gen_loss.backward()
 
-            real = torch.from_numpy(get_data(opt.batch_size, opt.seq_len,
-                                             opt.vocab_size)).cuda()
+            real = torch.from_numpy(task.get_data(opt.batch_size)).cuda()
             costs, _ = critic(real)
             E_real = costs.sum() / opt.batch_size
             real_loss = E_real + opt.reward_reg * costs.norm(opt.reward_reg_norm) / opt.batch_size
@@ -258,8 +264,7 @@ if __name__ == '__main__':
             actor.zero_grad()
             generated, corrections, logprobs, all_logprobs, avgprobs = actor()
             if print_generated:
-                generated.data[-1].copy_(torch.from_numpy(get_data(1, opt.seq_len,
-                                                                   opt.vocab_size)).cuda())
+                generated.data[-1].copy_(torch.from_numpy(task.get_data(1)).cuda())
                 corrections[-1].data.zero_()
                 all_logprobs = all_logprobs[:-1]
             costs, means = critic(generated.data)
@@ -310,3 +315,8 @@ if __name__ == '__main__':
             plt.legend(['W dist', 'D(real)', 'D(fake)'])
             fig.savefig(opt.save + '/train.png')
             plt.close()
+
+        if task.solved(avgprobs):
+            solved += 1
+        else:
+            solved = 0
