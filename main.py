@@ -95,6 +95,7 @@ class Critic(nn.Module):
         self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
         self.zero_state = torch.zeros([1, opt.batch_size, opt.hidden_size]).cuda()
         self.gamma = opt.gamma
+        self.normalize_rewards = False
 
     def forward(self, actions):
         actions = Variable(actions, requires_grad=False)
@@ -104,8 +105,7 @@ class Critic(nn.Module):
         outputs = outputs.contiguous()
         flattened = outputs.view(-1, self.opt.hidden_size)
         flat_costs = self.cost(flattened)
-        if self.opt.normalize_rewards:
-            # XXX perhaps do this only during actor training?
+        if self.normalize_rewards:
             # subtract mean to reduce variance. consider the mean to be a constant, and don't
             # backprop through it
             flat_costs -= flat_costs.mean(1).expand_as(flat_costs).detach()
@@ -135,14 +135,14 @@ if __name__ == '__main__':
                         help='the amount by which to increase gamma at each turn')
     parser.add_argument('--entropy_reg', type=float, default=1.0,
                         help='policy entropy regularization')
-    parser.add_argument('--reward_reg', type=float, default=0.0,
+    parser.add_argument('--reward_reg', type=float, default=1.0,
                         help='critic reward regularization')
     parser.add_argument('--reward_reg_norm', type=int, default=2)
     parser.add_argument('--normalize_rewards', type=int, default=1)
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--max_grad_norm', type=float, default=1.0,
                         help='norm for gradient clipping')
-    parser.add_argument('--clamp_limit', type=float, default=1.0,
+    parser.add_argument('--clamp_limit', type=float, default=-1,
                         help='critic param clamping. -1 to disable')
     parser.add_argument('--critic_iters', type=int, default=5,
                         help='number of critic iters per turn')
@@ -194,6 +194,7 @@ if __name__ == '__main__':
         # train critic
         for param in critic.parameters():  # reset requires_grad
             param.requires_grad = True  # they are set to False below in actor update
+        critic.normalize_rewards = False
         if epoch < 25 or epoch % 500 == 0:
             critic_iters = 100
         else:
@@ -234,6 +235,7 @@ if __name__ == '__main__':
         # train actor
         for param in critic.parameters():
             param.requires_grad = False  # to avoid computation
+        critic.normalize_rewards = bool(opt.normalize_rewards)
         if epoch < 25:
             actor_iters = 1
         else:
@@ -265,7 +267,10 @@ if __name__ == '__main__':
                 # print generated only in the first actor iteration
                 print('Generated:')
                 print(generated.data.cpu().numpy(), '\n')
-                print('Critic costs:')
+                if opt.normalize_rewards:
+                    print('Critic disadvantages:')
+                else:
+                    print('Critic costs:')
                 print(costs.data.cpu().numpy(), '\n')
                 print('Critic cost sums:')
                 print(costs.data.cpu().numpy().sum(1), '\n')
