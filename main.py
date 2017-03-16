@@ -95,7 +95,6 @@ class Critic(nn.Module):
         self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
         self.zero_state = torch.zeros([1, opt.batch_size, opt.hidden_size]).cuda()
         self.gamma = opt.gamma
-        self.normalize_rewards = False
 
     def forward(self, actions):
         actions = Variable(actions, requires_grad=False)
@@ -105,19 +104,20 @@ class Critic(nn.Module):
         outputs = outputs.contiguous()
         flattened = outputs.view(-1, self.opt.hidden_size)
         flat_costs = self.cost(flattened)
-        if self.normalize_rewards:
-            # subtract mean to reduce variance. consider the mean to be a constant, and don't
-            # backprop through it
-            flat_costs -= flat_costs.mean(1).expand_as(flat_costs).detach()
+        # subtract mean to reduce variance
+        flat_means = flat_costs.mean(1)
         costs = flat_costs.view(self.opt.batch_size, self.opt.seq_len + 1, self.opt.vocab_size)
         costs = costs[:, :-1]  # account for the padding
         costs = costs.gather(2, actions.unsqueeze(2)).squeeze(2)
+        means = flat_means.view(self.opt.batch_size, self.opt.seq_len + 1)
+        means = means[:, :-1]
         if self.gamma < 1.0 - 1e-8:
             discount = torch.cuda.FloatTensor([self.gamma ** i for i in xrange(self.opt.seq_len)])
             discount = discount.unsqueeze(0).expand(self.opt.batch_size, self.opt.seq_len)
             discount = Variable(discount, requires_grad=False)
             costs = costs * discount
-        return costs
+            means = means * discount
+        return costs, means
 
 
 if __name__ == '__main__':
@@ -194,7 +194,6 @@ if __name__ == '__main__':
         # train critic
         for param in critic.parameters():  # reset requires_grad
             param.requires_grad = True  # they are set to False below in actor update
-        critic.normalize_rewards = False
         if epoch < 25 or epoch % 500 == 0:
             critic_iters = 100
         else:
@@ -212,7 +211,8 @@ if __name__ == '__main__':
             # corrections would ensure that the critic doesn't have to worry about such actions
             # too much though.
             generated, corrections, _, _, _ = actor()
-            costs = critic(generated.data) * corrections
+            costs, _ = critic(generated.data)
+            costs = costs * corrections
             E_generated = costs.sum() / opt.batch_size
             gen_loss = -E_generated + \
                        opt.reward_reg * costs.norm(opt.reward_reg_norm) / opt.batch_size
@@ -220,7 +220,7 @@ if __name__ == '__main__':
 
             real = torch.from_numpy(get_data(opt.batch_size, opt.seq_len,
                                              opt.vocab_size)).cuda()
-            costs = critic(real)
+            costs, _ = critic(real)
             E_real = costs.sum() / opt.batch_size
             real_loss = E_real + opt.reward_reg * costs.norm(opt.reward_reg_norm) / opt.batch_size
             real_loss.backward()
@@ -235,7 +235,6 @@ if __name__ == '__main__':
         # train actor
         for param in critic.parameters():
             param.requires_grad = False  # to avoid computation
-        critic.normalize_rewards = bool(opt.normalize_rewards)
         if epoch < 25:
             actor_iters = 1
         else:
@@ -255,8 +254,12 @@ if __name__ == '__main__':
                                                                    opt.vocab_size)).cuda())
                 corrections[-1].data.zero_()
                 all_logprobs = all_logprobs[:-1]
-            costs = critic(generated.data)
-            loss = (costs * corrections * logprobs).sum() / opt.batch_size
+            costs, means = critic(generated.data)
+            if opt.normalize_rewards:
+                disadv = costs - means
+            else:
+                disadv = costs
+            loss = (disadv * corrections * logprobs).sum() / opt.batch_size
             all_probs = torch.exp(all_logprobs)
             entropy = -(all_probs * all_logprobs).sum() / opt.batch_size
             loss -= opt.entropy_reg * entropy
@@ -267,13 +270,13 @@ if __name__ == '__main__':
                 # print generated only in the first actor iteration
                 print('Generated:')
                 print(generated.data.cpu().numpy(), '\n')
-                if opt.normalize_rewards:
-                    print('Critic disadvantages:')
-                else:
-                    print('Critic costs:')
+                print('Critic costs:')
                 print(costs.data.cpu().numpy(), '\n')
                 print('Critic cost sums:')
                 print(costs.data.cpu().numpy().sum(1), '\n')
+                if opt.normalize_rewards:
+                    print('Critic advantages:')
+                    print(-disadv.data.cpu().numpy(), '\n')
                 if opt.task == 'longterm':
                     print('Batch-averaged step-wise probs:')
                     print(avgprobs, '\n')
