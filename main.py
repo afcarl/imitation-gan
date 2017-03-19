@@ -110,7 +110,7 @@ class Critic(nn.Module):
             discount = discount.unsqueeze(0).expand(self.opt.batch_size, self.opt.seq_len)
             discount = Variable(discount, requires_grad=False)
             costs = costs * discount
-        return costs
+        return costs ** 2
 
 
 if __name__ == '__main__':
@@ -128,15 +128,17 @@ if __name__ == '__main__':
                         help='the amount by which to increase gamma at each turn')
     parser.add_argument('--entropy_reg', type=float, default=1.0,
                         help='policy entropy regularization')
-    parser.add_argument('--reward_reg', type=float, default=1.0,
-                        help='critic reward regularization')
-    parser.add_argument('--reward_reg_norm', type=int, default=2)
+    parser.add_argument('--max_fake_cost', type=float, default=500.0,
+                        help='clip fake costs per timestep during critic training')
     parser.add_argument('--use_advantage', type=int, default=1)
     parser.add_argument('--replay_actors', type=int, default=10,
                         help='number of recent actors for experience replay')
     parser.add_argument('--solved_threshold', type=int, default=25,
                         help='conseq steps the task (if appl) has been solved for before exit')
-    parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
+    parser.add_argument('--actor_optimizer', type=str, default='RMSprop')
+    parser.add_argument('--actor_learning_rate', type=float, default=5e-5)
+    parser.add_argument('--critic_optimizer', type=str, default='Adam')
+    parser.add_argument('--critic_learning_rate', type=float, default=1e-4)
     parser.add_argument('--max_grad_norm', type=float, default=1.0,
                         help='norm for gradient clipping')
     parser.add_argument('--clamp_limit', type=float, default=-1,
@@ -185,9 +187,10 @@ if __name__ == '__main__':
     assert opt.replay_size >= opt.batch_size
     buffer = util.ReplayMemory(opt.replay_size)
 
-    actor_optimizer = optim.RMSprop(actor.parameters(), lr=opt.learning_rate)
-    critic_optimizer = optim.RMSprop(critic.parameters(), lr=opt.learning_rate)
-
+    actor_optimizer = getattr(optim, opt.actor_optimizer)(actor.parameters(),
+                                                          lr=opt.actor_learning_rate)
+    critic_optimizer = getattr(optim, opt.critic_optimizer)(critic.parameters(),
+                                                            lr=opt.critic_learning_rate)
     solved = 0
 
     print('\nReal examples:')
@@ -225,17 +228,15 @@ if __name__ == '__main__':
             corrections = Variable(torch.from_numpy(corrections).cuda(), requires_grad=False)
             costs = critic(generated).gather(2, Variable(generated.unsqueeze(2),
                                                          requires_grad=False)).squeeze(2)
+            costs = costs.clamp(0.0, opt.max_fake_cost)
             E_generated = (costs * corrections).sum() / opt.batch_size
-            gen_loss = -E_generated + \
-                       opt.reward_reg * costs.norm(opt.reward_reg_norm) / opt.batch_size
-            gen_loss.backward()
+            (-E_generated).backward()
 
             real = torch.from_numpy(task.get_data(opt.batch_size)).cuda()
             costs = critic(real).gather(2, Variable(real.unsqueeze(2),
                                                     requires_grad=False)).squeeze(2)
             E_real = costs.sum() / opt.batch_size
-            real_loss = E_real + opt.reward_reg * costs.norm(opt.reward_reg_norm) / opt.batch_size
-            real_loss.backward()
+            E_real.backward()
 
             nnutils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
             critic_optimizer.step()
