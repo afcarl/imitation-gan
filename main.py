@@ -40,31 +40,31 @@ class Actor(nn.Module):
     def forward(self):
         outputs = []
         corrections = []
-        logprobs = []
-        dists = []
+        all_logprobs = []
+        all_probs = []
         probs = []  # for debugging
         hidden = Variable(self.zero_state)
         inputs = self.embedding(Variable(self.zero_input))
         for out_i in xrange(self.opt.seq_len):
             hidden = self.cell(inputs, hidden)
             dist = F.log_softmax(self.dist(hidden))
-            dists.append(dist.unsqueeze(1))
+            all_logprobs.append(dist.unsqueeze(1))
+            prob = torch.exp(dist)
+            all_probs.append(prob.unsqueeze(1))
             dist_new = dist.detach()
-            prob = torch.exp(dist_new)
             probs.append(prob.data.mean(0).squeeze(0).cpu().numpy())  # for debugging
+            # eps sampling
             if self.eps_sample:
                 dist_new = dist_new.clone()
                 draw_randomly = self.opt.eps >= torch.rand([self.opt.batch_size])
                 draw_randomly = draw_randomly.byte().unsqueeze(1).cuda().expand_as(dist_new)
                 # set uniform distribution with opt.eps probability
                 dist_new[draw_randomly] = -np.log(self.opt.vocab_size)
-            # eps sampling
             # torch.multinomial is broken, so this is the workaround
             _, sampled = torch.max(dist_new.data -
                                    torch.log(-torch.log(torch.rand(*dist_new.size()).cuda())), 1)
             sampled = Variable(sampled, requires_grad=False)
-            logprob = dist.gather(1, sampled)
-            onpolicy_prob = prob.gather(1, sampled)
+            onpolicy_prob = prob.gather(1, sampled).detach()
             if self.eps_sample:
                 offpolicy_prob = torch.exp(dist_new.gather(1, sampled))
             else:
@@ -75,11 +75,10 @@ class Actor(nn.Module):
             outputs.append(sampled)
             # use importance sampling to correct for eps sampling
             corrections.append(onpolicy_prob / offpolicy_prob)
-            logprobs.append(logprob)
             if out_i < self.opt.seq_len - 1:
                 inputs = self.embedding(sampled.squeeze(1))
-        return (torch.cat(outputs, 1), torch.cat(corrections, 1), torch.cat(logprobs, 1),
-                torch.cat(dists, 1), np.array(probs))
+        return (torch.cat(outputs, 1), torch.cat(corrections, 1), torch.cat(all_logprobs, 1),
+                torch.cat(all_probs, 1), np.array(probs))
 
 
 class Critic(nn.Module):
@@ -104,20 +103,14 @@ class Critic(nn.Module):
         outputs = outputs.contiguous()
         flattened = outputs.view(-1, self.opt.hidden_size)
         flat_costs = self.cost(flattened)
-        # subtract mean to reduce variance
-        flat_means = flat_costs.mean(1)
         costs = flat_costs.view(self.opt.batch_size, self.opt.seq_len + 1, self.opt.vocab_size)
         costs = costs[:, :-1]  # account for the padding
-        costs = costs.gather(2, actions.unsqueeze(2)).squeeze(2)
-        means = flat_means.view(self.opt.batch_size, self.opt.seq_len + 1)
-        means = means[:, :-1]
         if self.gamma < 1.0 - 1e-8:
             discount = torch.cuda.FloatTensor([self.gamma ** i for i in xrange(self.opt.seq_len)])
             discount = discount.unsqueeze(0).expand(self.opt.batch_size, self.opt.seq_len)
             discount = Variable(discount, requires_grad=False)
             costs = costs * discount
-            means = means * discount
-        return costs, means
+        return costs
 
 
 if __name__ == '__main__':
@@ -138,7 +131,7 @@ if __name__ == '__main__':
     parser.add_argument('--reward_reg', type=float, default=1.0,
                         help='critic reward regularization')
     parser.add_argument('--reward_reg_norm', type=int, default=2)
-    parser.add_argument('--normalize_rewards', type=int, default=1)
+    parser.add_argument('--use_advantage', type=int, default=1)
     parser.add_argument('--replay_size', type=int, default=8000)
     parser.add_argument('--solved_threshold', type=int, default=25,
                         help='conseq steps the task (if appl) has been solved for before exit')
@@ -227,15 +220,16 @@ if __name__ == '__main__':
             generated, corrections = buffer.sample(opt.batch_size)
             generated = torch.from_numpy(generated).cuda()
             corrections = Variable(torch.from_numpy(corrections).cuda(), requires_grad=False)
-            costs, _ = critic(generated)
-            costs = costs * corrections
-            E_generated = costs.sum() / opt.batch_size
+            costs = critic(generated).gather(2, Variable(generated.unsqueeze(2),
+                                                         requires_grad=False)).squeeze(2)
+            E_generated = (costs * corrections).sum() / opt.batch_size
             gen_loss = -E_generated + \
                        opt.reward_reg * costs.norm(opt.reward_reg_norm) / opt.batch_size
             gen_loss.backward()
 
             real = torch.from_numpy(task.get_data(opt.batch_size)).cuda()
-            costs, _ = critic(real)
+            costs = critic(real).gather(2, Variable(real.unsqueeze(2),
+                                                    requires_grad=False)).squeeze(2)
             E_real = costs.sum() / opt.batch_size
             real_loss = E_real + opt.reward_reg * costs.norm(opt.reward_reg_norm) / opt.batch_size
             real_loss.backward()
@@ -263,18 +257,23 @@ if __name__ == '__main__':
 
         for actor_i in xrange(actor_iters):
             actor.zero_grad()
-            generated, corrections, logprobs, all_logprobs, avgprobs = actor()
-            if print_generated:
+            generated, corrections, all_logprobs, all_probs, avgprobs = actor()
+            if print_generated:  # last sample is real, for debugging
                 generated.data[-1].copy_(torch.from_numpy(task.get_data(1)).cuda())
-                corrections[-1].data.zero_()
-                all_logprobs = all_logprobs[:-1]
-            costs, means = critic(generated.data)
-            if opt.normalize_rewards:
-                disadv = costs - means
+            logprobs = all_logprobs.gather(2, generated.unsqueeze(2)).squeeze(2)
+            costs = critic(generated.data)
+            if opt.use_advantage:
+                baseline = (costs * all_probs).detach().sum(2).expand_as(costs)
+                disadv = costs - baseline
             else:
                 disadv = costs
+            if print_generated:  # do not train on real sample
+                corrections[-1].data.zero_()
+                all_logprobs = all_logprobs[:-1]
+                all_probs = all_probs[:-1]
+            costs = costs.gather(2, generated.unsqueeze(2)).squeeze(2)
+            disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
             loss = (disadv * corrections * logprobs).sum() / opt.batch_size
-            all_probs = torch.exp(all_logprobs)
             entropy = -(all_probs * all_logprobs).sum() / opt.batch_size
             loss -= opt.entropy_reg * entropy
             loss.backward()
@@ -288,7 +287,7 @@ if __name__ == '__main__':
                 print(costs.data.cpu().numpy(), '\n')
                 print('Critic cost sums:')
                 print(costs.data.cpu().numpy().sum(1), '\n')
-                if opt.normalize_rewards:
+                if opt.use_advantage:
                     print('Critic advantages:')
                     print(-disadv.data.cpu().numpy(), '\n')
                 if opt.task == 'longterm':
