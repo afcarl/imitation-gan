@@ -132,7 +132,8 @@ if __name__ == '__main__':
                         help='critic reward regularization')
     parser.add_argument('--reward_reg_norm', type=int, default=2)
     parser.add_argument('--use_advantage', type=int, default=1)
-    parser.add_argument('--replay_size', type=int, default=8000)
+    parser.add_argument('--replay_actors', type=int, default=10,
+                        help='number of recent actors for experience replay')
     parser.add_argument('--solved_threshold', type=int, default=25,
                         help='conseq steps the task (if appl) has been solved for before exit')
     parser.add_argument('--learning_rate', type=float, default=0.00005, help='learning rate')
@@ -162,6 +163,8 @@ if __name__ == '__main__':
     plot_r = []
     plot_f = []
     plot_w = []
+
+    opt.replay_size = opt.replay_actors * opt.batch_size * opt.critic_iters
 
     cudnn.benchmark = True
     np.set_printoptions(precision=4, threshold=10000, linewidth=200, suppress=True)
@@ -199,7 +202,7 @@ if __name__ == '__main__':
         # train critic
         for param in critic.parameters():  # reset requires_grad
             param.requires_grad = True  # they are set to False below in actor update
-        if epoch < 25 or epoch % 500 == 0:
+        if epoch < 25:
             critic_iters = 100
         else:
             critic_iters = opt.critic_iters
