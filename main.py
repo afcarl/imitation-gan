@@ -320,7 +320,14 @@ if __name__ == '__main__':
             fig.savefig(opt.save + '/train.png')
             plt.close()
 
-        if task.solved(avgprobs):
+        if opt.task == 'longterm':
+            params = [avgprobs]
+        elif opt.task == 'words':
+            generated = generated.data.cpu().numpy()
+            if print_generated and actor_iters == 1:
+                generated = generated[:-1]
+            params = [generated]
+        if task.solved(*params):
             solved += 1
         else:
             solved = 0

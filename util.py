@@ -85,6 +85,9 @@ class WordsTask(Task):
             batch[:, i] = cur_word
         return batch
 
+    def solved(self, generated):  # TODO
+        return False
+
 
 class LongtermTask(Task):
     def __init__(self, seq_len, vocab_size):
