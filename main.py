@@ -110,7 +110,13 @@ class Critic(nn.Module):
             discount = discount.unsqueeze(0).expand(self.opt.batch_size, self.opt.seq_len)
             discount = Variable(discount, requires_grad=False)
             costs = costs * discount
-        return costs ** 2
+        costs_abs = torch.abs(costs)
+        if self.opt.smooth_zero:
+            costs_sq = costs ** 2
+            select = (costs_abs > 1.0).float()
+            return (select * costs_abs) + ((1.0 - select) * costs_sq)
+        else:
+            return costs_abs
 
 
 if __name__ == '__main__':
@@ -122,16 +128,18 @@ if __name__ == '__main__':
                         help='character vocab size for toy data')
     parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
     parser.add_argument('--hidden_size', type=int, default=128, help='RNN hidden size')
-    parser.add_argument('--eps', type=float, default=0.0, help='epsilon for eps sampling')
+    parser.add_argument('--eps', type=float, default=0.0, help='epsilon for eps sampling')  # TODO this can help
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--gamma_inc', type=float, default=0.0,
                         help='the amount by which to increase gamma at each turn')
     parser.add_argument('--entropy_reg', type=float, default=1.0,
                         help='policy entropy regularization')
-    parser.add_argument('--max_fake_cost', type=float, default=500.0,
+    parser.add_argument('--max_fake_cost', type=float, default=50.0,
                         help='clip fake costs per timestep during critic training')
+    parser.add_argument('--smooth_zero', type=int, default=0,
+                        help='use c^2 instead of |c| when critic score c<1')
     parser.add_argument('--use_advantage', type=int, default=1)
-    parser.add_argument('--replay_actors', type=int, default=10,
+    parser.add_argument('--replay_actors', type=int, default=10,  # TODO smarter replay
                         help='number of recent actors for experience replay')
     parser.add_argument('--solved_threshold', type=int, default=25,
                         help='conseq steps the task (if appl) has been solved for before exit')
@@ -151,6 +159,8 @@ if __name__ == '__main__':
     parser.add_argument('--task', type=str, default='longterm', help='longterm or words')
     parser.add_argument('--print_every', type=int, default=25,
                         help='print losses every these many steps')
+    parser.add_argument('--plot_every', type=int, default=1,
+                        help='plot losses every these many steps')
     parser.add_argument('--gen_every', type=int, default=25,
                         help='generate sample every these many steps')
     opt = parser.parse_args()
@@ -301,22 +311,23 @@ if __name__ == '__main__':
                 actor.eps_sample = opt.eps > 1e-8
         critic.gamma = min(critic.gamma + opt.gamma_inc, 1.0)
 
-        plot_x.append(epoch)
-        plot_r.append(-np.array(err_r).mean())
-        plot_f.append(-np.array(err_f).mean())
-        plot_w.append(np.array(Wdists).mean())
         if epoch % opt.print_every == 0:
             print(epoch, ':\tWdist:', np.array(Wdists).mean(), '\terr R: ', np.array(err_r).mean(),
                   '\terr F: ', np.array(err_f).mean(), '\t gamma: ', critic.gamma)
             train_log.write('%.4f\t%.4f\t%.4f\n' % (np.array(Wdists).mean(), np.array(err_r).mean(),
                             np.array(err_f).mean()))
             train_log.flush()
+        if epoch % opt.plot_every == 0:
+            plot_x.append(epoch)
+            plot_r.append(np.array(err_r).mean())
+            plot_f.append(np.array(err_f).mean())
+            plot_w.append(np.array(Wdists).mean())
             fig = plt.figure()
             x_array = np.array(plot_x)
             plt.plot(x_array, np.array(plot_w), c=colors[0])
             plt.plot(x_array, np.array(plot_r), c=colors[1])
             plt.plot(x_array, np.array(plot_f), c=colors[2])
-            plt.legend(['W dist', 'D(real)', 'D(fake)'])
+            plt.legend(['W dist', 'D(real)', 'D(fake)'], loc=2)
             fig.savefig(opt.save + '/train.png')
             plt.close()
 
