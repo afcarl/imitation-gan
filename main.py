@@ -128,7 +128,7 @@ if __name__ == '__main__':
                         help='character vocab size for toy data')
     parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
     parser.add_argument('--hidden_size', type=int, default=128, help='RNN hidden size')
-    parser.add_argument('--eps', type=float, default=0.0, help='epsilon for eps sampling')  # TODO this can help
+    parser.add_argument('--eps', type=float, default=0.0, help='epsilon for eps sampling')
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--gamma_inc', type=float, default=0.0,
                         help='the amount by which to increase gamma at each turn')
@@ -136,7 +136,7 @@ if __name__ == '__main__':
                         help='policy entropy regularization')
     parser.add_argument('--max_fake_cost', type=float, default=50.0,
                         help='clip fake costs per timestep during critic training')
-    parser.add_argument('--smooth_zero', type=int, default=0,
+    parser.add_argument('--smooth_zero', type=int, default=1,
                         help='use c^2 instead of |c| when critic score c<1')
     parser.add_argument('--use_advantage', type=int, default=1)
     parser.add_argument('--replay_actors', type=int, default=10,  # TODO smarter replay
@@ -145,8 +145,8 @@ if __name__ == '__main__':
                         help='conseq steps the task (if appl) has been solved for before exit')
     parser.add_argument('--actor_optimizer', type=str, default='RMSprop')
     parser.add_argument('--actor_learning_rate', type=float, default=5e-5)
-    parser.add_argument('--critic_optimizer', type=str, default='Adam')
-    parser.add_argument('--critic_learning_rate', type=float, default=1e-4)
+    parser.add_argument('--critic_optimizer', type=str, default='RMSprop')
+    parser.add_argument('--critic_learning_rate', type=float, default=5e-5)
     parser.add_argument('--max_grad_norm', type=float, default=1.0,
                         help='norm for gradient clipping')
     parser.add_argument('--clamp_limit', type=float, default=-1,
