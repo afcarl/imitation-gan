@@ -111,8 +111,8 @@ class Critic(nn.Module):
             discount = Variable(discount, requires_grad=False)
             costs = costs * discount
         costs_abs = torch.abs(costs)
-        if self.opt.smooth_zero:
-            costs_sq = costs ** 2
+        if self.opt.smooth_zero > 1e-4:
+            costs_sq = ((costs / self.opt.smooth_zero) ** 2) * self.opt.smooth_zero
             select = (costs_abs > 1.0).float()
             return (select * costs_abs) + ((1.0 - select) * costs_sq)
         else:
@@ -136,8 +136,8 @@ if __name__ == '__main__':
                         help='policy entropy regularization')
     parser.add_argument('--max_fake_cost', type=float, default=50.0,
                         help='clip fake costs per timestep during critic training')
-    parser.add_argument('--smooth_zero', type=int, default=1,
-                        help='use c^2 instead of |c| when critic score c<1')
+    parser.add_argument('--smooth_zero', type=float, default=1.0,
+                        help='use ((c/s)^2)*s instead of |c| when critic score c<s')
     parser.add_argument('--use_advantage', type=int, default=1)
     parser.add_argument('--replay_actors', type=int, default=10,  # TODO smarter replay
                         help='number of recent actors for experience replay')
