@@ -85,8 +85,8 @@ class WordsTask(Task):
             batch[:, i] = cur_word
         return batch
 
-    def solved(self, generated):  # TODO
-        return False
+    def solved(self, generated):
+        return False  # TODO
 
 
 class LongtermTask(Task):

@@ -158,7 +158,7 @@ if __name__ == '__main__':
     parser.add_argument('--actor_iters', type=int, default=5,  # 15 or 20 for larger tasks
                         help='number of actor iters per turn')
     parser.add_argument('--name', type=str, default='default')
-    parser.add_argument('--task', type=str, default='longterm', help='longterm or words')
+    parser.add_argument('--task', type=str, default='words', help='longterm or words')
     parser.add_argument('--print_every', type=int, default=25,
                         help='print losses every these many steps')
     parser.add_argument('--plot_every', type=int, default=1,
@@ -310,6 +310,8 @@ if __name__ == '__main__':
                 if opt.task == 'longterm':
                     print('Batch-averaged step-wise probs:')
                     print(avgprobs, '\n')
+                elif opt.task == 'words':
+                    pass  # TODO visualize progress
                 print_generated = False
                 actor.eps_sample = opt.eps > 1e-8
         critic.gamma = min(critic.gamma + opt.gamma_inc, 1.0)
