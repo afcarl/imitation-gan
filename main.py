@@ -139,8 +139,12 @@ if __name__ == '__main__':
     parser.add_argument('--smooth_zero', type=float, default=1.0,
                         help='use ((c/s)^2)*s instead of |c| when critic score c<s')
     parser.add_argument('--use_advantage', type=int, default=1)
-    parser.add_argument('--replay_actors', type=int, default=10,  # TODO smarter replay
-                        help='number of recent actors for experience replay')
+    parser.add_argument('--exp_replay_buffer', type=int, default=0,
+                        help='use a replay buffer with an exponential distribution')
+    parser.add_argument('--replay_actors', type=int, default=10,  # higher with exp buffer
+                        help='number of actors for experience replay')
+    parser.add_argument('--replay_actors_half', type=int, default=3,
+                        help='number of recent actors making up half of the exponential replay')
     parser.add_argument('--solved_threshold', type=int, default=200,
                         help='conseq steps the task (if appl) has been solved for before exit')
     parser.add_argument('--solved_max_fail', type=int, default=10,
@@ -179,6 +183,7 @@ if __name__ == '__main__':
     plot_w = []
 
     opt.replay_size = opt.replay_actors * opt.batch_size * opt.critic_iters
+    opt.replay_size_half = opt.replay_actors_half * opt.batch_size * opt.critic_iters
 
     cudnn.benchmark = True
     np.set_printoptions(precision=4, threshold=10000, linewidth=200, suppress=True)
@@ -197,7 +202,10 @@ if __name__ == '__main__':
     critic.cuda()
 
     assert opt.replay_size >= opt.batch_size
-    buffer = util.ReplayMemory(opt.replay_size)
+    if opt.exp_replay_buffer:
+        buffer = util.ExponentialReplayMemory(opt.replay_size, opt.replay_size_half)
+    else:
+        buffer = util.ReplayMemory(opt.replay_size)
 
     actor_optimizer = getattr(optim, opt.actor_optimizer)(actor.parameters(),
                                                           lr=opt.actor_learning_rate)

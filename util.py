@@ -33,6 +33,33 @@ class ReplayMemory(object):
         return len(self.memory)
 
 
+class ExponentialReplayMemory(object):
+    def __init__(self, capacity, half):
+        self.capacity = capacity
+        self.memory = []
+        exp_lambda = np.log(2) / half
+        self.probs = np.array([exp_lambda * np.exp(-exp_lambda * i) for i in xrange(capacity)])
+
+    def push(self, generations, corrections):
+        for i in xrange(generations.shape[0]):
+            self._push(generations[i], corrections[i])
+
+    def _push(self, generation, correction):
+        self.memory.insert(0, (generation, correction))
+        if len(self.memory) > self.capacity:
+            self.memory.pop()
+
+    def sample(self, batch_size):
+        probs = self.probs[:len(self.memory)]
+        probs /= probs.sum()
+        indices = np.random.choice(len(self.memory), size=batch_size, replace=False, p=probs)
+        generations, corrections = zip(*[self.memory[i] for i in indices])
+        return np.array(generations), np.array(corrections)
+
+    def __len__(self):
+        return len(self.memory)
+
+
 def weights_init(m):
     def linear_init(weight):
         fan_out, fan_in = weight.size()
