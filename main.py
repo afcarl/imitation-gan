@@ -141,8 +141,10 @@ if __name__ == '__main__':
     parser.add_argument('--use_advantage', type=int, default=1)
     parser.add_argument('--replay_actors', type=int, default=10,  # TODO smarter replay
                         help='number of recent actors for experience replay')
-    parser.add_argument('--solved_threshold', type=int, default=25,
+    parser.add_argument('--solved_threshold', type=int, default=200,
                         help='conseq steps the task (if appl) has been solved for before exit')
+    parser.add_argument('--solved_max_fail', type=int, default=10,
+                        help='maximum number of failures before solved streak is reset')
     parser.add_argument('--actor_optimizer', type=str, default='RMSprop')
     parser.add_argument('--actor_learning_rate', type=float, default=5e-5)
     parser.add_argument('--critic_optimizer', type=str, default='RMSprop')
@@ -151,9 +153,9 @@ if __name__ == '__main__':
                         help='norm for gradient clipping')
     parser.add_argument('--clamp_limit', type=float, default=-1,
                         help='critic param clamping. -1 to disable')
-    parser.add_argument('--critic_iters', type=int, default=15,
+    parser.add_argument('--critic_iters', type=int, default=10,  # 20 or 25 for larger tasks
                         help='number of critic iters per turn')
-    parser.add_argument('--actor_iters', type=int, default=10,
+    parser.add_argument('--actor_iters', type=int, default=5,  # 15 or 20 for larger tasks
                         help='number of actor iters per turn')
     parser.add_argument('--name', type=str, default='default')
     parser.add_argument('--task', type=str, default='longterm', help='longterm or words')
@@ -202,6 +204,7 @@ if __name__ == '__main__':
     critic_optimizer = getattr(optim, opt.critic_optimizer)(critic.parameters(),
                                                             lr=opt.critic_learning_rate)
     solved = 0
+    solved_fail = 0
 
     print('\nReal examples:')
     print(task.get_data(opt.batch_size), '\n')
@@ -312,8 +315,9 @@ if __name__ == '__main__':
         critic.gamma = min(critic.gamma + opt.gamma_inc, 1.0)
 
         if epoch % opt.print_every == 0:
-            print(epoch, ':\tWdist:', np.array(Wdists).mean(), '\terr R: ', np.array(err_r).mean(),
-                  '\terr F: ', np.array(err_f).mean(), '\t gamma: ', critic.gamma)
+            print(epoch, ':\tWdist:', np.array(Wdists).mean(), '\terr R:', np.array(err_r).mean(),
+                  '\terr F:', np.array(err_f).mean(), '\tgamma:', critic.gamma, '\tsolved:', solved,
+                  '\tsolved_fail:', solved_fail)
             train_log.write('%.4f\t%.4f\t%.4f\n' % (np.array(Wdists).mean(), np.array(err_r).mean(),
                             np.array(err_f).mean()))
             train_log.flush()
@@ -341,4 +345,12 @@ if __name__ == '__main__':
         if task.solved(*params):
             solved += 1
         else:
-            solved = 0
+            reset = True
+            if solved > 0:
+                reset = False
+                solved_fail += 1
+                if solved_fail >= opt.solved_max_fail:
+                    reset = True
+            if reset:
+                solved = 0
+                solved_fail = 0
