@@ -112,8 +112,9 @@ class Critic(nn.Module):
             costs = costs * discount
         costs_abs = torch.abs(costs)
         if self.opt.smooth_zero > 1e-4:
-            costs_sq = ((costs / self.opt.smooth_zero) ** 2) * self.opt.smooth_zero
-            select = (costs_abs > 1.0).float()
+            select = (costs_abs >= self.opt.smooth_zero).float()
+            costs_abs = costs_abs - (self.opt.smooth_zero / 2)
+            costs_sq = (costs ** 2) / (self.opt.smooth_zero * 2)
             return (select * costs_abs) + ((1.0 - select) * costs_sq)
         else:
             return costs_abs
@@ -137,7 +138,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_fake_cost', type=float, default=50.0,
                         help='clip fake costs per timestep during critic training')
     parser.add_argument('--smooth_zero', type=float, default=1.0,
-                        help='use ((c/s)^2)*s instead of |c| when critic score c<s')
+                        help='s, use c^2/2s instead of c-(s/2) when critic score c<s')
     parser.add_argument('--use_advantage', type=int, default=1)
     parser.add_argument('--exp_replay_buffer', type=int, default=0,
                         help='use a replay buffer with an exponential distribution')
@@ -162,7 +163,7 @@ if __name__ == '__main__':
     parser.add_argument('--actor_iters', type=int, default=5,  # 15 or 20 for larger tasks
                         help='number of actor iters per turn')
     parser.add_argument('--name', type=str, default='default')
-    parser.add_argument('--task', type=str, default='words', help='longterm or words')
+    parser.add_argument('--task', type=str, default='longterm', help='longterm or words')
     parser.add_argument('--print_every', type=int, default=25,
                         help='print losses every these many steps')
     parser.add_argument('--plot_every', type=int, default=1,
