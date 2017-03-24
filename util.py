@@ -78,6 +78,20 @@ def weights_init(m):
         m.weight.data.uniform_()
 
 
+def gradient_norm(parameters, norm_type=2):
+    # remove this method once pytorch is updated, clip_grad_norn will return the original total norm
+    parameters = list(filter(lambda p: p.grad is not None, parameters))
+    if norm_type == float('inf'):
+        total_norm = max(p.grad.data.abs().max() for p in parameters)
+    else:
+        total_norm = 0
+        for p in parameters:
+            param_norm = p.grad.data.norm(norm_type)
+            total_norm += param_norm ** norm_type
+        total_norm = total_norm ** (1. / norm_type)
+    return total_norm
+
+
 class Task(object):
     def __init__(self, seq_len, vocab_size):
         self.seq_len = seq_len

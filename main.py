@@ -182,6 +182,8 @@ if __name__ == '__main__':
     plot_r = []
     plot_f = []
     plot_w = []
+    plot_cgnorm = []
+    plot_agnorm = []
 
     opt.replay_size = opt.replay_actors * opt.batch_size * opt.critic_iters
     opt.replay_size_half = opt.replay_actors_half * opt.batch_size * opt.critic_iters
@@ -234,6 +236,7 @@ if __name__ == '__main__':
         Wdists = []
         err_r = []
         err_f = []
+        critic_gnorms = []
         for critic_i in xrange(critic_iters):
             if opt.clamp_limit > 0:
                 for param in critic.parameters():
@@ -260,6 +263,7 @@ if __name__ == '__main__':
             E_real = costs.sum() / opt.batch_size
             E_real.backward()
 
+            critic_gnorms.append(util.gradient_norm(critic.parameters()))
             nnutils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
             critic_optimizer.step()
             Wdist = (E_generated - E_real).data[0]
@@ -281,6 +285,7 @@ if __name__ == '__main__':
         else:
             print_generated = False
 
+        actor_gnorms = []
         for actor_i in xrange(actor_iters):
             actor.zero_grad()
             generated, corrections, all_logprobs, all_probs, avgprobs = actor()
@@ -303,6 +308,7 @@ if __name__ == '__main__':
             entropy = -(all_probs * all_logprobs).sum() / opt.batch_size
             loss -= opt.entropy_reg * entropy
             loss.backward()
+            actor_gnorms.append(util.gradient_norm(actor.parameters()))
             nnutils.clip_grad_norm(actor.parameters(), opt.max_grad_norm)
             actor_optimizer.step()
             if print_generated:
@@ -344,6 +350,15 @@ if __name__ == '__main__':
             plt.plot(x_array, np.array(plot_f), c=colors[2])
             plt.legend(['W dist', 'D(real)', 'D(fake)'], loc=2)
             fig.savefig(opt.save + '/train.png')
+            plt.close()
+
+            plot_agnorm.append(np.array(actor_gnorms).mean())
+            plot_cgnorm.append(np.array(critic_gnorms).mean())
+            fig = plt.figure()
+            plt.plot(x_array, np.array(plot_agnorm), c=colors[0])
+            plt.plot(x_array, np.array(plot_cgnorm), c=colors[1])
+            plt.legend(['Actor grad norm', 'Critic grad norm'], loc=2)
+            fig.savefig(opt.save + '/grads.png')
             plt.close()
 
         if opt.task == 'longterm':
