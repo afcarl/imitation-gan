@@ -154,21 +154,25 @@ class LongtermTask(Task):
         for i in xrange(self.seq_len):
             probs = avgprobs[i]
             if i in indices:
-                if probs[0] > 0.05:
+                if probs[0] > min(0.05, 1 / (2 * self.vocab_size)):
                     return False
                 meanprob = 1 / (self.vocab_size - 1)
                 for j in xrange(1, self.vocab_size):
+                    if probs[j] < 1 / (2 * self.vocab_size):
+                        return False
                     if np.abs(probs[j] - meanprob) > 0.01 * (self.vocab_size - 1):
                         return False
             elif i in half_indices:
-                if probs[0] > 0.05:
+                if probs[0] > min(0.05, 1 / (2 * self.vocab_size)):
                     return False
                 meanprob = 1 / ((self.vocab_size // 2) - 1)
                 for j in xrange(1, self.vocab_size // 2):
+                    if probs[j] < 1 / self.vocab_size:
+                        return False
                     if np.abs(probs[j] - meanprob) > 0.02 * (self.vocab_size // 2 - 1):
                         return False
                 for j in xrange(self.vocab_size // 2, self.vocab_size):
-                    if probs[j] > 0.025:
+                    if probs[j] > min(0.025, 1 / (2 * self.vocab_size)):
                         return False
             else:
                 if probs[0] < 0.95:
