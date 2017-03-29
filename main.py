@@ -30,6 +30,7 @@ class Actor(nn.Module):
     def __init__(self, opt):
         super(Actor, self).__init__()
         self.opt = opt
+        # TODO allow tying embedding and dist weights
         self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
         self.cell = nn.GRUCell(opt.emb_size, opt.actor_hidden_size)
         self.dist = nn.Linear(opt.actor_hidden_size, opt.vocab_size)
@@ -87,6 +88,7 @@ class Critic(nn.Module):
     def __init__(self, opt):
         super(Critic, self).__init__()
         self.opt = opt
+        # TODO allow tying embedding and cost weights
         self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
         self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.critic_hidden_size,
                           num_layers=opt.critic_layers, batch_first=True)
@@ -131,6 +133,7 @@ if __name__ == '__main__':
     parser.add_argument('--actor_hidden_size', type=int, default=128, help='Actor RNN hidden size')
     parser.add_argument('--critic_hidden_size', type=int, default=128,
                         help='Critic RNN hidden size')
+    parser.add_argument('--critic_layers', type=int, default=1)  # TODO add actor_layers
     parser.add_argument('--eps', type=float, default=0.0, help='epsilon for eps sampling')
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--gamma_inc', type=float, default=0.0,
@@ -156,7 +159,6 @@ if __name__ == '__main__':
     parser.add_argument('--actor_learning_rate', type=float, default=5e-5)
     parser.add_argument('--critic_optimizer', type=str, default='RMSprop')
     parser.add_argument('--critic_learning_rate', type=float, default=5e-5)
-    parser.add_argument('--critic_layers', type=int, default=1)
     parser.add_argument('--max_grad_norm', type=float, default=1.0,
                         help='norm for gradient clipping')
     parser.add_argument('--clamp_limit', type=float, default=-1,
