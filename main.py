@@ -30,10 +30,11 @@ class Actor(nn.Module):
     def __init__(self, opt):
         super(Actor, self).__init__()
         self.opt = opt
-        # TODO allow tying embedding and dist weights
         self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
         self.cell = nn.GRUCell(opt.emb_size, opt.actor_hidden_size)
-        self.dist = nn.Linear(opt.actor_hidden_size, opt.vocab_size)
+        self.dist1 = nn.Linear(opt.actor_hidden_size, opt.emb_size)
+        self.dist2 = nn.Linear(opt.emb_size, opt.vocab_size)
+        self.embedding.weight = self.dist2.weight  # tie weights
         self.zero_input = torch.LongTensor(opt.batch_size).zero_().cuda()
         self.zero_state = torch.zeros([opt.batch_size, opt.actor_hidden_size]).cuda()
         self.eps_sample = True  # do eps sampling
@@ -48,7 +49,7 @@ class Actor(nn.Module):
         inputs = self.embedding(Variable(self.zero_input))
         for out_i in xrange(self.opt.seq_len):
             hidden = self.cell(inputs, hidden)
-            dist = F.log_softmax(self.dist(hidden))
+            dist = F.log_softmax(self.dist2(self.dist1(hidden)))
             all_logprobs.append(dist.unsqueeze(1))
             prob = torch.exp(dist)
             all_probs.append(prob.unsqueeze(1))
@@ -88,7 +89,6 @@ class Critic(nn.Module):
     def __init__(self, opt):
         super(Critic, self).__init__()
         self.opt = opt
-        # TODO allow tying embedding and cost weights
         self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
         self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.critic_hidden_size,
                           num_layers=opt.critic_layers, batch_first=True)
