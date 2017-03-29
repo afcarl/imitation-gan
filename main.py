@@ -31,10 +31,10 @@ class Actor(nn.Module):
         super(Actor, self).__init__()
         self.opt = opt
         self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
-        self.cell = nn.GRUCell(opt.emb_size, opt.hidden_size)
-        self.dist = nn.Linear(opt.hidden_size, opt.vocab_size)
+        self.cell = nn.GRUCell(opt.emb_size, opt.actor_hidden_size)
+        self.dist = nn.Linear(opt.actor_hidden_size, opt.vocab_size)
         self.zero_input = torch.LongTensor(opt.batch_size).zero_().cuda()
-        self.zero_state = torch.zeros([opt.batch_size, opt.hidden_size]).cuda()
+        self.zero_state = torch.zeros([opt.batch_size, opt.actor_hidden_size]).cuda()
         self.eps_sample = True  # do eps sampling
 
     def forward(self):
@@ -88,11 +88,11 @@ class Critic(nn.Module):
         super(Critic, self).__init__()
         self.opt = opt
         self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
-        self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.hidden_size, num_layers=1,
-                          batch_first=True)
-        self.cost = nn.Linear(opt.hidden_size, opt.vocab_size)
+        self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.critic_hidden_size,
+                          num_layers=opt.critic_layers, batch_first=True)
+        self.cost = nn.Linear(opt.critic_hidden_size, opt.vocab_size)
         self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
-        self.zero_state = torch.zeros([1, opt.batch_size, opt.hidden_size]).cuda()
+        self.zero_state = torch.zeros([1, opt.batch_size, opt.critic_hidden_size]).cuda()
         self.gamma = opt.gamma
 
     def forward(self, actions):
@@ -101,7 +101,7 @@ class Critic(nn.Module):
         inputs = self.embedding(padded_actions)
         outputs, _ = self.rnn(inputs, Variable(self.zero_state))
         outputs = outputs.contiguous()
-        flattened = outputs.view(-1, self.opt.hidden_size)
+        flattened = outputs.view(-1, self.opt.critic_hidden_size)
         flat_costs = self.cost(flattened)
         costs = flat_costs.view(self.opt.batch_size, self.opt.seq_len + 1, self.opt.vocab_size)
         costs = costs[:, :-1]  # account for the padding
@@ -128,7 +128,9 @@ if __name__ == '__main__':
     parser.add_argument('--vocab_size', type=int, default=6,
                         help='character vocab size for toy data')
     parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
-    parser.add_argument('--hidden_size', type=int, default=128, help='RNN hidden size')
+    parser.add_argument('--actor_hidden_size', type=int, default=128, help='Actor RNN hidden size')
+    parser.add_argument('--critic_hidden_size', type=int, default=128,
+                        help='Critic RNN hidden size')
     parser.add_argument('--eps', type=float, default=0.0, help='epsilon for eps sampling')
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--gamma_inc', type=float, default=0.0,
@@ -154,6 +156,7 @@ if __name__ == '__main__':
     parser.add_argument('--actor_learning_rate', type=float, default=5e-5)
     parser.add_argument('--critic_optimizer', type=str, default='RMSprop')
     parser.add_argument('--critic_learning_rate', type=float, default=5e-5)
+    parser.add_argument('--critic_layers', type=int, default=1)
     parser.add_argument('--max_grad_norm', type=float, default=1.0,
                         help='norm for gradient clipping')
     parser.add_argument('--clamp_limit', type=float, default=-1,
