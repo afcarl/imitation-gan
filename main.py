@@ -126,7 +126,7 @@ class Critic(nn.Module):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--niter', type=int, default=1000000, help='number of epochs to train for')
+    parser.add_argument('--niter', type=int, default=1000000, help='number of iters to train for')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
     parser.add_argument('--seq_len', type=int, default=15, help='toy sequence length')
     parser.add_argument('--vocab_size', type=int, default=6,
@@ -204,6 +204,7 @@ if __name__ == '__main__':
     cudnn.benchmark = True
     np.set_printoptions(precision=4, threshold=10000, linewidth=200, suppress=True)
 
+    # TODO add the 'ptb' task
     if opt.task == 'words':
         task = util.WordsTask(opt.seq_len, opt.vocab_size)
     elif opt.task == 'longterm':
@@ -233,16 +234,16 @@ if __name__ == '__main__':
     print('\nReal examples:')
     print(task.get_data(opt.batch_size), '\n')
     plot_x = []
-    for epoch in xrange(opt.niter):
+    for cur_iter in xrange(opt.niter):
         if solved >= opt.solved_threshold:
-            print('%d: Task solved, exiting.' % epoch)
+            print('%d: Task solved, exiting.' % cur_iter)
             break
         actor.eps_sample = opt.eps > 1e-8
 
         # train critic
         for param in critic.parameters():  # reset requires_grad
             param.requires_grad = True  # they are set to False below in actor update
-        if epoch < opt.burnin:
+        if cur_iter < opt.burnin:
             critic_iters = opt.burnin_critic_iters
         else:
             critic_iters = opt.critic_iters
@@ -288,11 +289,11 @@ if __name__ == '__main__':
         # train actor
         for param in critic.parameters():
             param.requires_grad = False  # to avoid computation
-        if epoch < opt.burnin:
+        if cur_iter < opt.burnin:
             actor_iters = opt.burnin_actor_iters
         else:
             actor_iters = opt.actor_iters
-        if epoch % opt.gen_every == 0:
+        if cur_iter % opt.gen_every == 0:
             # disable eps_sample since we intend to visualize a (noiseless) generation.
             print_generated = True
             actor.eps_sample = False
@@ -339,21 +340,19 @@ if __name__ == '__main__':
                 if opt.task == 'longterm':
                     print('Batch-averaged step-wise probs:')
                     print(avgprobs, '\n')
-                elif opt.task == 'words':
-                    pass  # TODO visualize progress
                 print_generated = False
                 actor.eps_sample = opt.eps > 1e-8
         critic.gamma = min(critic.gamma + opt.gamma_inc, 1.0)
 
-        if epoch % opt.print_every == 0:
-            print(epoch, ':\tWdist:', np.array(Wdists).mean(), '\terr R:', np.array(err_r).mean(),
-                  '\terr F:', np.array(err_f).mean(), '\tgamma:', critic.gamma, '\tsolved:', solved,
-                  '\tsolved_fail:', solved_fail)
+        if cur_iter % opt.print_every == 0:
+            print(cur_iter, ':\tWdist:', np.array(Wdists).mean(), '\terr R:',
+                  np.array(err_r).mean(), '\terr F:', np.array(err_f).mean(), '\tgamma:',
+                  critic.gamma, '\tsolved:', solved, '\tsolved_fail:', solved_fail)
             train_log.write('%.4f\t%.4f\t%.4f\n' % (np.array(Wdists).mean(), np.array(err_r).mean(),
                             np.array(err_f).mean()))
             train_log.flush()
-        if epoch % opt.plot_every == 0:
-            plot_x.append(epoch)
+        if cur_iter % opt.plot_every == 0:
+            plot_x.append(cur_iter)
             plot_r.append(np.array(err_r).mean())
             plot_f.append(np.array(err_f).mean())
             plot_w.append(np.array(Wdists).mean())
