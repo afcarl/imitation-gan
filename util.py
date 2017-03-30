@@ -106,18 +106,22 @@ class Task(object):
         '''Return true if the task has been solved, according to data'''
         return False
 
+    def display(self, data):
+        print(data)
+
 
 class LMTask(Task):
     def __init__(self, data_dir, seq_len):
         super(LMTask, self).__init__(seq_len, 0)
         self.word2idx = {}
         self.idx2word = []
-        self.add_word('<sos>')  # zero_input is padded to the front in the model
-        self.add_word('<pad>')  # to pad after eos
-        self.add_word('<eos>')
+        self.add_word('<s>')  # zero_input is padded to the front in the model
+        self.add_word('<p>')  # to pad after eos
+        self.add_word('<e>')  # eos
         self.splits = {}
         for s in ['train', 'valid', 'test']:
             self.splits[s] = self.tokenize(os.path.join(data_dir, s + '.txt'), seq_len)
+        random.shuffle(self.splits['train'])
         self.vocab_size = len(self.idx2word)
         self.current = 0
 
@@ -133,7 +137,7 @@ class LMTask(Task):
         ret = []
         with open(path, 'r') as f:
             for line in f:
-                words = line.split() + ['<eos>']
+                words = line.split() + ['<e>']
                 if max_seq_len > 0:
                     words = words[:max_seq_len]
                 ids = []
@@ -151,10 +155,18 @@ class LMTask(Task):
             random.shuffle(data)
         data = data[self.current:self.current+batch_size]
         self.current += batch_size
-        batch = np.ones([batch_size, self.seq_len], dtype=np.int) * self.word2idx['<pad>']
+        batch = np.ones([batch_size, self.seq_len], dtype=np.int) * self.word2idx['<p>']
         for i, s in enumerate(data):
             batch[i, :len(s)] = s
         return batch
+
+    def display(self, data):
+        print(data)
+        for s in data:
+            print('=>', end=' ')
+            for w in s:
+                print(self.idx2word[w], end=' ')
+            print()
 
 
 class WordsTask(Task):

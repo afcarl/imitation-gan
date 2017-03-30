@@ -128,7 +128,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--niter', type=int, default=1000000, help='number of iters to train for')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
-    parser.add_argument('--seq_len', type=int, default=25, help='toy sequence length')
+    parser.add_argument('--seq_len', type=int, default=20, help='toy sequence length')
     parser.add_argument('--vocab_size', type=int, default=6,
                         help='character vocab size for toy data')
     parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
@@ -236,7 +236,8 @@ if __name__ == '__main__':
     solved_fail = 0
 
     print('\nReal examples:')
-    print(task.get_data(opt.batch_size), '\n')
+    task.display(task.get_data(opt.batch_size))
+    print()
     plot_x = []
     for cur_iter in xrange(opt.niter):
         if solved >= opt.solved_threshold:
@@ -333,7 +334,8 @@ if __name__ == '__main__':
             if print_generated:
                 # print generated only in the first actor iteration
                 print('Generated:')
-                print(generated.data.cpu().numpy(), '\n')
+                task.display(generated.data.cpu().numpy())
+                print()
                 print('Critic costs:')
                 print(costs.data.cpu().numpy(), '\n')
                 print('Critic cost sums:')
@@ -378,13 +380,13 @@ if __name__ == '__main__':
             fig.savefig(opt.save + '/grads.png')
             plt.close()
 
-        if opt.task == 'longterm':
-            params = [avgprobs]
-        elif opt.task == 'words':
+        if opt.task == 'words':
             generated = generated.data.cpu().numpy()
             if print_generated and actor_iters == 1:
                 generated = generated[:-1]
             params = [generated]
+        else:
+            params = [None]
         if task.solved(*params):
             solved += 1
         else:
