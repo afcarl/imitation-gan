@@ -89,12 +89,14 @@ class Critic(nn.Module):
     def __init__(self, opt):
         super(Critic, self).__init__()
         self.opt = opt
-        self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
+        self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size, max_norm=1)
         self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.critic_hidden_size,
-                          num_layers=opt.critic_layers, batch_first=True)
-        self.cost = nn.Linear(opt.critic_hidden_size, opt.vocab_size)
+                          num_layers=opt.critic_layers, dropout=opt.critic_dropout,
+                          batch_first=True)
+        self.cost = nn.Linear(opt.critic_hidden_size, opt.emb_size)
         self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
-        self.zero_state = torch.zeros([1, opt.batch_size, opt.critic_hidden_size]).cuda()
+        self.zero_state = torch.zeros([opt.critic_layers, opt.batch_size,
+                                       opt.critic_hidden_size]).cuda()
         self.gamma = opt.gamma
 
     def forward(self, actions):
@@ -104,7 +106,7 @@ class Critic(nn.Module):
         outputs, _ = self.rnn(inputs, Variable(self.zero_state))
         outputs = outputs.contiguous()
         flattened = outputs.view(-1, self.opt.critic_hidden_size)
-        flat_costs = self.cost(flattened)
+        flat_costs = F.linear(self.cost(flattened), torch.renorm(self.embedding.weight, 2, 1, 1.0))
         costs = flat_costs.view(self.opt.batch_size, self.opt.seq_len + 1, self.opt.vocab_size)
         costs = costs[:, :-1]  # account for the padding
         if self.gamma < 1.0 - 1e-8:
@@ -134,6 +136,7 @@ if __name__ == '__main__':
     parser.add_argument('--critic_hidden_size', type=int, default=128,
                         help='Critic RNN hidden size')
     parser.add_argument('--critic_layers', type=int, default=1)  # TODO add actor_layers
+    parser.add_argument('--critic_dropout', type=float, default=0.0)  # TODO add actor_dropout
     parser.add_argument('--eps', type=float, default=0.0, help='epsilon for eps sampling')
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--gamma_inc', type=float, default=0.0,
@@ -167,6 +170,9 @@ if __name__ == '__main__':
                         help='number of critic iters per turn')
     parser.add_argument('--actor_iters', type=int, default=5,  # 15 or 20 for larger tasks
                         help='number of actor iters per turn')
+    parser.add_argument('--burnin', type=int, default=25, help='number of burnin iterations')
+    parser.add_argument('--burnin_actor_iters', type=int, default=1)
+    parser.add_argument('--burnin_critic_iters', type=int, default=100)
     parser.add_argument('--name', type=str, default='default')
     parser.add_argument('--task', type=str, default='longterm', help='longterm or words')
     parser.add_argument('--print_every', type=int, default=25,
@@ -234,8 +240,8 @@ if __name__ == '__main__':
         # train critic
         for param in critic.parameters():  # reset requires_grad
             param.requires_grad = True  # they are set to False below in actor update
-        if epoch < 25:
-            critic_iters = 100
+        if epoch < opt.burnin:
+            critic_iters = opt.burnin_critic_iters
         else:
             critic_iters = opt.critic_iters
         Wdists = []
@@ -258,7 +264,8 @@ if __name__ == '__main__':
             corrections = Variable(torch.from_numpy(corrections).cuda(), requires_grad=False)
             costs = critic(generated).gather(2, Variable(generated.unsqueeze(2),
                                                          requires_grad=False)).squeeze(2)
-            costs = costs.clamp(0.0, opt.max_fake_cost)
+            if opt.max_fake_cost > 0:
+                costs = costs.clamp(0.0, opt.max_fake_cost)
             E_generated = (costs * corrections).sum() / opt.batch_size
             (-E_generated).backward()
 
@@ -279,8 +286,8 @@ if __name__ == '__main__':
         # train actor
         for param in critic.parameters():
             param.requires_grad = False  # to avoid computation
-        if epoch < 25:
-            actor_iters = 1
+        if epoch < opt.burnin:
+            actor_iters = opt.burnin_actor_iters
         else:
             actor_iters = opt.actor_iters
         if epoch % opt.gen_every == 0:
