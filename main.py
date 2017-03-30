@@ -128,7 +128,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--niter', type=int, default=1000000, help='number of iters to train for')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
-    parser.add_argument('--seq_len', type=int, default=15, help='toy sequence length')
+    parser.add_argument('--seq_len', type=int, default=25, help='toy sequence length')
     parser.add_argument('--vocab_size', type=int, default=6,
                         help='character vocab size for toy data')
     parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
@@ -176,7 +176,8 @@ if __name__ == '__main__':
     parser.add_argument('--burnin_actor_iters', type=int, default=1)
     parser.add_argument('--burnin_critic_iters', type=int, default=100)
     parser.add_argument('--name', type=str, default='default')
-    parser.add_argument('--task', type=str, default='longterm', help='longterm or words')
+    parser.add_argument('--task', type=str, default='lm', help='one of lm/longterm/words')
+    parser.add_argument('--lm_data_dir', type=str, default='data/penn')
     parser.add_argument('--print_every', type=int, default=25,
                         help='print losses every these many steps')
     parser.add_argument('--plot_every', type=int, default=1,
@@ -204,11 +205,14 @@ if __name__ == '__main__':
     cudnn.benchmark = True
     np.set_printoptions(precision=4, threshold=10000, linewidth=200, suppress=True)
 
-    # TODO add the 'ptb' task
     if opt.task == 'words':
         task = util.WordsTask(opt.seq_len, opt.vocab_size)
     elif opt.task == 'longterm':
         task = util.LongtermTask(opt.seq_len, opt.vocab_size)
+    elif opt.task == 'lm':
+        task = util.LMTask(opt.lm_data_dir, opt.seq_len)
+        opt.vocab_size = task.vocab_size
+        print('vocab_size:', opt.vocab_size)
     else:
         print('error: invalid task name:', opt.task)
         sys.exit(1)

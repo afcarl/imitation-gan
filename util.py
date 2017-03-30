@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
 import random
 from six.moves import xrange
 
@@ -104,6 +105,56 @@ class Task(object):
     def solved(self, data):
         '''Return true if the task has been solved, according to data'''
         return False
+
+
+class LMTask(Task):
+    def __init__(self, data_dir, seq_len):
+        super(LMTask, self).__init__(seq_len, 0)
+        self.word2idx = {}
+        self.idx2word = []
+        self.add_word('<sos>')  # zero_input is padded to the front in the model
+        self.add_word('<pad>')  # to pad after eos
+        self.add_word('<eos>')
+        self.splits = {}
+        for s in ['train', 'valid', 'test']:
+            self.splits[s] = self.tokenize(os.path.join(data_dir, s + '.txt'), seq_len)
+        self.vocab_size = len(self.idx2word)
+        self.current = 0
+
+    def add_word(self, word):
+        if word not in self.word2idx:
+            self.word2idx[word] = len(self.idx2word)
+            self.idx2word.append(word)
+        return self.word2idx[word]
+
+    def tokenize(self, path, max_seq_len):
+        """Tokenizes a text file and returns a list of sentences."""
+        assert os.path.exists(path)
+        ret = []
+        with open(path, 'r') as f:
+            for line in f:
+                words = line.split() + ['<eos>']
+                if max_seq_len > 0:
+                    words = words[:max_seq_len]
+                ids = []
+                for word in words:
+                    ids.append(self.add_word(word))
+                self.seq_len = max(self.seq_len, len(ids))
+                ret.append(ids)
+        return ret
+
+    def get_data(self, batch_size):
+        data = self.splits['train']
+        assert len(data) >= batch_size
+        if self.current + batch_size > len(data):
+            self.current = 0
+            random.shuffle(data)
+        data = data[self.current:self.current+batch_size]
+        self.current += batch_size
+        batch = np.ones([batch_size, self.seq_len], dtype=np.int) * self.word2idx['<pad>']
+        for i, s in enumerate(data):
+            batch[i, :len(s)] = s
+        return batch
 
 
 class WordsTask(Task):
