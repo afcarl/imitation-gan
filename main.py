@@ -89,11 +89,11 @@ class Critic(nn.Module):
     def __init__(self, opt):
         super(Critic, self).__init__()
         self.opt = opt
-        self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size, max_norm=1)
+        self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
         self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.critic_hidden_size,
                           num_layers=opt.critic_layers, dropout=opt.critic_dropout,
                           batch_first=True)
-        self.cost = nn.Linear(opt.critic_hidden_size, opt.emb_size)
+        self.cost = nn.Linear(opt.critic_hidden_size, opt.vocab_size)
         self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
         self.zero_state = torch.zeros([opt.critic_layers, opt.batch_size,
                                        opt.critic_hidden_size]).cuda()
@@ -106,7 +106,7 @@ class Critic(nn.Module):
         outputs, _ = self.rnn(inputs, Variable(self.zero_state))
         outputs = outputs.contiguous()
         flattened = outputs.view(-1, self.opt.critic_hidden_size)
-        flat_costs = F.linear(self.cost(flattened), torch.renorm(self.embedding.weight, 2, 1, 1.0))
+        flat_costs = self.cost(flattened)
         costs = flat_costs.view(self.opt.batch_size, self.opt.seq_len + 1, self.opt.vocab_size)
         costs = costs[:, :-1]  # account for the padding
         if self.gamma < 1.0 - 1e-8:
@@ -150,6 +150,8 @@ if __name__ == '__main__':
     parser.add_argument('--use_advantage', type=int, default=1)
     parser.add_argument('--exp_replay_buffer', type=int, default=0,
                         help='use a replay buffer with an exponential distribution')
+    parser.add_argument('--real_multiplier', type=float, default=5.0,
+                        help='weight for real samples as compared to fake for critic learning')
     parser.add_argument('--replay_actors', type=int, default=10,  # higher with exp buffer
                         help='number of actors for experience replay')
     parser.add_argument('--replay_actors_half', type=int, default=3,
@@ -273,7 +275,7 @@ if __name__ == '__main__':
             costs = critic(real).gather(2, Variable(real.unsqueeze(2),
                                                     requires_grad=False)).squeeze(2)
             E_real = costs.sum() / opt.batch_size
-            E_real.backward()
+            (E_real * opt.real_multiplier).backward()
 
             critic_gnorms.append(util.gradient_norm(critic.parameters()))
             nnutils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
