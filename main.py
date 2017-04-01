@@ -178,11 +178,12 @@ if __name__ == '__main__':
     parser.add_argument('--name', type=str, default='default')
     parser.add_argument('--task', type=str, default='lm', help='one of lm/longterm/words')
     parser.add_argument('--lm_data_dir', type=str, default='data/penn')
+    parser.add_argument('--lm_char', type=int, default=0, help='1 for character level model')
     parser.add_argument('--print_every', type=int, default=25,
                         help='print losses every these many steps')
     parser.add_argument('--plot_every', type=int, default=1,
                         help='plot losses every these many steps')
-    parser.add_argument('--gen_every', type=int, default=25,
+    parser.add_argument('--gen_every', type=int, default=200,
                         help='generate sample every these many steps')
     opt = parser.parse_args()
     print(opt)
@@ -210,7 +211,7 @@ if __name__ == '__main__':
     elif opt.task == 'longterm':
         task = util.LongtermTask(opt.seq_len, opt.vocab_size)
     elif opt.task == 'lm':
-        task = util.LMTask(opt.lm_data_dir, opt.seq_len)
+        task = util.LMTask(opt.lm_data_dir, opt.seq_len, opt.lm_char)
         opt.vocab_size = task.vocab_size
         print('vocab_size:', opt.vocab_size)
     else:

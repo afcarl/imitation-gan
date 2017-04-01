@@ -111,8 +111,9 @@ class Task(object):
 
 
 class LMTask(Task):
-    def __init__(self, data_dir, seq_len):
+    def __init__(self, data_dir, seq_len, char_model):
         super(LMTask, self).__init__(seq_len, 0)
+        self.char_model = char_model
         self.word2idx = {}
         self.idx2word = []
         self.add_word('<s>')  # zero_input is padded to the front in the model
@@ -137,7 +138,17 @@ class LMTask(Task):
         ret = []
         with open(path, 'r') as f:
             for line in f:
-                words = line.split() + ['<e>']
+                words = line.strip().split()
+                if self.char_model:
+                    chars = []
+                    for word in words:
+                        if word == '<unk>':
+                            chars.append('<u>')
+                        else:
+                            chars.extend([c for c in word])
+                        chars.append(' ')
+                    words = chars[:-1]
+                words.append('<e>')
                 if max_seq_len > 0:
                     words = words[:max_seq_len]
                 ids = []
@@ -163,9 +174,13 @@ class LMTask(Task):
     def display(self, data):
         print(data)
         for s in data:
+            if self.char_model:
+                end = ''
+            else:
+                end = ' '
             print('=>', end=' ')
             for w in s:
-                print(self.idx2word[w], end=' ')
+                print(self.idx2word[w], end=end)
             print()
 
 
