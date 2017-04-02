@@ -211,9 +211,10 @@ if __name__ == '__main__':
     elif opt.task == 'longterm':
         task = util.LongtermTask(opt.seq_len, opt.vocab_size)
     elif opt.task == 'lm':
-        task = util.LMTask(opt.lm_data_dir, opt.seq_len, opt.lm_char)
-        opt.vocab_size = task.vocab_size
-        print('vocab_size:', opt.vocab_size)
+        task = util.LMTask(opt.seq_len, opt.vocab_size, opt.lm_data_dir, opt.lm_char)
+        if task.vocab_size != opt.vocab_size:
+            opt.vocab_size = task.vocab_size
+            print('Updated vocab_size:', opt.vocab_size)
     else:
         print('error: invalid task name:', opt.task)
         sys.exit(1)

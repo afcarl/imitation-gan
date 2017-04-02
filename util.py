@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import collections
 import os
 import random
 from six.moves import xrange
@@ -111,62 +112,78 @@ class Task(object):
 
 
 class LMTask(Task):
-    def __init__(self, data_dir, seq_len, char_model):
-        super(LMTask, self).__init__(seq_len, 0)
+    def __init__(self, seq_len, vocab_size, data_dir, char_model):
+        super(LMTask, self).__init__(seq_len, vocab_size)
         self.char_model = char_model
-        self.word2idx = {}
-        self.idx2word = []
-        self.add_word('<s>')  # zero_input is padded to the front in the model
-        self.add_word('<p>')  # to pad after eos
-        self.add_word('<e>')  # eos
+        self.word_counts = collections.Counter()
+        self.add_word('<s>', special=True)  # zero_input is padded to the front in the model
+        self.add_word('<p>', special=True)  # to pad after eos
+        self.add_word('<e>', special=True)  # eos
+        self.add_word('<u>', special=True)  # unknown word token
+        for s in ['train', 'valid', 'test']:
+            self.prepare_vocab(os.path.join(data_dir, s + '.txt'))
+        self.idx2word = [w for w, _ in self.word_counts.most_common(self.vocab_size)]
+        self.word2idx = {w: i for i, w in enumerate(self.idx2word)}
         self.splits = {}
         for s in ['train', 'valid', 'test']:
-            self.splits[s] = self.tokenize(os.path.join(data_dir, s + '.txt'), seq_len)
+            self.splits[s] = self.tokenize(os.path.join(data_dir, s + '.txt'))
         random.shuffle(self.splits['train'])
         self.vocab_size = len(self.idx2word)
         self.current = 0
 
-    def add_word(self, word):
-        if word not in self.word2idx:
-            self.word2idx[word] = len(self.idx2word)
-            self.idx2word.append(word)
-        return self.word2idx[word]
+    def add_word(self, word, special=False):
+        '''update word counts. if a word is special, it cannot be pruned when deciding the top
+           words to keep'''
+        if special:
+            self.word_counts[word] += float('inf')
+        else:
+            self.word_counts[word] += 1
 
-    def tokenize(self, path, max_seq_len):
-        """Tokenizes a text file and returns a list of sentences."""
+    def iterate_sents(self, path):
         assert os.path.exists(path)
-        ret = []
         with open(path, 'r') as f:
             for line in f:
-                words = line.strip().split()
+                words = line.strip().replace('<unk>', '<u>').split()
                 if self.char_model:
                     chars = []
                     for word in words:
-                        if word == '<unk>':
-                            chars.append('<u>')
+                        if word == '<u>':
+                            chars.append(word)
                         else:
                             chars.extend([c for c in word])
                         chars.append(' ')
                     words = chars[:-1]
                 words.append('<e>')
-                if max_seq_len > 0:
-                    words = words[:max_seq_len]
-                ids = []
-                for word in words:
-                    ids.append(self.add_word(word))
-                self.seq_len = max(self.seq_len, len(ids))
-                ret.append(ids)
+                if self.seq_len > 0:
+                    words = words[:self.seq_len]
+                yield words
+
+    def prepare_vocab(self, path):
+        for sent in self.iterate_sents(path):
+            for word in sent:
+                self.add_word(word)
+
+    def tokenize(self, path):
+        """Tokenizes a text file and returns a list of sentences."""
+        ret = []
+        unk_index = self.word2idx['<u>']
+        for sent in self.iterate_sents(path):
+            ids = []
+            for word in sent:
+                ids.append(self.word2idx.get(word, unk_index))
+            ret.append(ids)
         return ret
 
     def get_data(self, batch_size):
         data = self.splits['train']
         assert len(data) >= batch_size
+        pad_index = self.word2idx['<p>']
         if self.current + batch_size > len(data):
             self.current = 0
             random.shuffle(data)
         data = data[self.current:self.current+batch_size]
         self.current += batch_size
-        batch = np.ones([batch_size, self.seq_len], dtype=np.int) * self.word2idx['<p>']
+        batch = np.ones([batch_size, self.seq_len], dtype=np.int) * pad_index
         for i, s in enumerate(data):
             batch[i, :len(s)] = s
         return batch
