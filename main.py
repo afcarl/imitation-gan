@@ -381,7 +381,9 @@ if __name__ == '__main__':
             fig.savefig(opt.save + '/grads.png')
             plt.close()
 
-        if opt.task == 'words':
+        if opt.task == 'longterm':
+            params = [avgprobs]
+        elif opt.task == 'words':
             generated = generated.data.cpu().numpy()
             if print_generated and actor_iters == 1:
                 generated = generated[:-1]
