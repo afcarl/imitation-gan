@@ -129,11 +129,10 @@ if __name__ == '__main__':
     parser.add_argument('--niter', type=int, default=1000000, help='number of iters to train for')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
     parser.add_argument('--seq_len', type=int, default=20, help='toy sequence length')
-    parser.add_argument('--vocab_size', type=int, default=6,
-                        help='character vocab size for toy data')
-    parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
-    parser.add_argument('--actor_hidden_size', type=int, default=128, help='Actor RNN hidden size')
-    parser.add_argument('--critic_hidden_size', type=int, default=128,
+    parser.add_argument('--vocab_size', type=int, default=200, help='vocab size for data')
+    parser.add_argument('--emb_size', type=int, default=160, help='embedding size')
+    parser.add_argument('--actor_hidden_size', type=int, default=224, help='Actor RNN hidden size')
+    parser.add_argument('--critic_hidden_size', type=int, default=224,
                         help='Critic RNN hidden size')
     parser.add_argument('--critic_layers', type=int, default=1)  # TODO add actor_layers
     parser.add_argument('--critic_dropout', type=float, default=0.0)  # TODO add actor_dropout
