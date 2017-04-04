@@ -267,7 +267,7 @@ if __name__ == '__main__':
             generated = torch.from_numpy(generated).cuda()
             corrections = Variable(torch.from_numpy(corrections).cuda(), requires_grad=False)
             logprobs = critic(generated)
-            entropy = -(torch.exp(logprobs) * logprobs).sum() / opt.batch_size
+            entropy = (torch.exp(-logprobs) * logprobs).sum() / opt.batch_size
             costs = logprobs.gather(2, Variable(generated.unsqueeze(2),
                                                 requires_grad=False)).squeeze(2)
             E_generated = (costs * corrections).sum() / opt.batch_size
@@ -276,7 +276,7 @@ if __name__ == '__main__':
 
             real = torch.from_numpy(task.get_data(opt.batch_size)).cuda()
             logprobs = critic(real)
-            entropy = -(torch.exp(logprobs) * logprobs).sum() / opt.batch_size
+            entropy = (torch.exp(-logprobs) * logprobs).sum() / opt.batch_size
             costs = logprobs.gather(2, Variable(real.unsqueeze(2),
                                                 requires_grad=False)).squeeze(2)
             E_real = costs.sum() / opt.batch_size
