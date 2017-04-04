@@ -142,6 +142,8 @@ if __name__ == '__main__':
                         help='the amount by which to increase gamma at each turn')
     parser.add_argument('--entropy_reg', type=float, default=1.0,
                         help='policy entropy regularization')
+    parser.add_argument('--critic_entropy_reg', type=float, default=0.0,
+                        help='critic entropy regularization')
     parser.add_argument('--max_fake_cost', type=float, default=50.0,
                         help='clip fake costs per timestep during critic training')
     parser.add_argument('--smooth_zero', type=float, default=1.0,
@@ -182,7 +184,7 @@ if __name__ == '__main__':
                         help='print losses every these many steps')
     parser.add_argument('--plot_every', type=int, default=1,
                         help='plot losses every these many steps')
-    parser.add_argument('--gen_every', type=int, default=200,
+    parser.add_argument('--gen_every', type=int, default=50,
                         help='generate sample every these many steps')
     opt = parser.parse_args()
     print(opt)
@@ -273,16 +275,20 @@ if __name__ == '__main__':
             corrections = Variable(torch.from_numpy(corrections).cuda(), requires_grad=False)
             costs = critic(generated).gather(2, Variable(generated.unsqueeze(2),
                                                          requires_grad=False)).squeeze(2)
+            entropy = -((1e-6 + costs) * torch.log(1e-6 + costs)).sum() / opt.batch_size
             if opt.max_fake_cost > 0:
                 costs = costs.clamp(0.0, opt.max_fake_cost)
             E_generated = (costs * corrections).sum() / opt.batch_size
-            (-E_generated).backward()
+            loss = -E_generated - (opt.critic_entropy_reg * entropy)
+            loss.backward()
 
             real = torch.from_numpy(task.get_data(opt.batch_size)).cuda()
             costs = critic(real).gather(2, Variable(real.unsqueeze(2),
                                                     requires_grad=False)).squeeze(2)
+            entropy = -((1e-6 + costs) * torch.log(1e-6 + costs)).sum() / opt.batch_size
             E_real = costs.sum() / opt.batch_size
-            (E_real * opt.real_multiplier).backward()
+            loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy)
+            loss.backward()
 
             critic_gnorms.append(util.gradient_norm(critic.parameters()))
             nnutils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
