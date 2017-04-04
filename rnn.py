@@ -79,9 +79,14 @@ if __name__ == '__main__':
     np.set_printoptions(precision=4, threshold=10000, linewidth=200, suppress=True)
 
     if opt.task == 'words':
-        get_data = util.get_toy_data_words
+        task = util.WordsTask(opt.seq_len, opt.vocab_size)
     elif opt.task == 'longterm':
-        get_data = util.get_toy_data_longterm
+        task = util.LongtermTask(opt.seq_len, opt.vocab_size)
+    elif opt.task == 'lm':
+        task = util.LMTask(opt.seq_len, opt.vocab_size, opt.lm_data_dir, opt.lm_char)
+        if task.vocab_size != opt.vocab_size:
+            opt.vocab_size = task.vocab_size
+            print('Updated vocab_size:', opt.vocab_size)
     else:
         print('error: invalid task name:', opt.task)
         sys.exit(1)
@@ -93,14 +98,13 @@ if __name__ == '__main__':
     optimizer = optim.RMSprop(model.parameters(), lr=opt.learning_rate)
 
     print('\nReal examples:')
-    print(get_data(opt.batch_size, opt.seq_len, opt.vocab_size), '\n')
+    print(task.get_data(opt.batch_size), '\n')
     for epoch in xrange(opt.niter):
         if opt.clamp_limit > 0.0:
             for param in model.parameters():
                 param.data.clamp_(-opt.clamp_limit, opt.clamp_limit)
         model.zero_grad()
-        real = Variable(torch.from_numpy(get_data(opt.batch_size, opt.seq_len,
-                                                  opt.vocab_size)).cuda())
+        real = Variable(torch.from_numpy(task.get_data(opt.batch_size)).cuda())
         logprobs = model(real)
         loss = criterion(logprobs.view(-1, opt.vocab_size), real.view(-1))
         loss.backward()
