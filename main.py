@@ -143,7 +143,7 @@ if __name__ == '__main__':
                         help='policy entropy regularization')
     parser.add_argument('--critic_entropy_reg', type=float, default=0.0,
                         help='critic entropy regularization')
-    parser.add_argument('--max_fake_cost', type=float, default=50.0,
+    parser.add_argument('--max_fake_cost', type=float, default=50.0,  # TODO remove with WGAN-GP
                         help='clip fake costs per timestep during critic training')
     parser.add_argument('--smooth_zero', type=float, default=1.0,
                         help='s, use c^2/2s instead of c-(s/2) when critic score c<s')
@@ -166,7 +166,7 @@ if __name__ == '__main__':
     parser.add_argument('--critic_learning_rate', type=float, default=5e-5)
     parser.add_argument('--max_grad_norm', type=float, default=1.0,
                         help='norm for gradient clipping')
-    parser.add_argument('--clamp_limit', type=float, default=-1,
+    parser.add_argument('--clamp_limit', type=float, default=-1,  # TODO remove with WGAN-GP
                         help='critic param clamping. -1 to disable')
     parser.add_argument('--critic_iters', type=int, default=10,  # 20 or 25 for larger tasks
                         help='number of critic iters per turn')
