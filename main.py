@@ -18,7 +18,6 @@ from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.utils as nnutils  # remove after updating pytorch
 import torch.optim as optim
 
 import util
@@ -62,7 +61,7 @@ class Actor(nn.Module):
                 draw_randomly = draw_randomly.byte().unsqueeze(1).cuda().expand_as(dist_new)
                 # set uniform distribution with opt.eps probability
                 dist_new[draw_randomly] = -np.log(self.opt.vocab_size)
-            # torch.multinomial is broken, so this is the workaround
+            # torch.multinomial is broken, so this is the workaround  TODO change now
             _, sampled = torch.max(dist_new.data -
                                    torch.log(-torch.log(torch.rand(*dist_new.size()).cuda())), 1)
             sampled = Variable(sampled, requires_grad=False)
@@ -290,8 +289,8 @@ if __name__ == '__main__':
             loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy)
             loss.backward()
 
-            critic_gnorms.append(util.gradient_norm(critic.parameters()))
-            nnutils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
+            critic_gnorms.append(util.gradient_norm(critic.parameters()))  # TODO not needed now
+            nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
             critic_optimizer.step()
             Wdist = (E_generated - E_real).data[0]
             Wdists.append(Wdist)
@@ -336,7 +335,7 @@ if __name__ == '__main__':
             loss -= opt.entropy_reg * entropy
             loss.backward()
             actor_gnorms.append(util.gradient_norm(actor.parameters()))
-            nnutils.clip_grad_norm(actor.parameters(), opt.max_grad_norm)
+            nn.utils.clip_grad_norm(actor.parameters(), opt.max_grad_norm)
             actor_optimizer.step()
             if print_generated:
                 # print generated only in the first actor iteration
