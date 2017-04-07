@@ -64,7 +64,7 @@ class Actor(nn.Module):
             # torch.multinomial is broken, so this is the workaround  TODO change now
             _, sampled = torch.max(dist_new.data -
                                    torch.log(-torch.log(torch.rand(*dist_new.size()).cuda())), 1)
-            sampled = Variable(sampled, requires_grad=False)
+            sampled = Variable(sampled)
             onpolicy_prob = prob.gather(1, sampled).detach()
             if self.eps_sample:
                 offpolicy_prob = torch.exp(dist_new.gather(1, sampled))
@@ -99,8 +99,8 @@ class Critic(nn.Module):
         self.gamma = opt.gamma
 
     def forward(self, actions):
-        actions = Variable(actions, requires_grad=False)
-        padded_actions = torch.cat([Variable(self.zero_input, requires_grad=False), actions], 1)
+        actions = Variable(actions, requires_grad=True)
+        padded_actions = torch.cat([Variable(self.zero_input), actions], 1)
         inputs = self.embedding(padded_actions)
         outputs, _ = self.rnn(inputs, Variable(self.zero_state))
         outputs = outputs.contiguous()
@@ -111,16 +111,16 @@ class Critic(nn.Module):
         if self.gamma < 1.0 - 1e-8:
             discount = torch.cuda.FloatTensor([self.gamma ** i for i in xrange(self.opt.seq_len)])
             discount = discount.unsqueeze(0).expand(self.opt.batch_size, self.opt.seq_len)
-            discount = Variable(discount, requires_grad=False)
+            discount = Variable(discount)
             costs = costs * discount
         costs_abs = torch.abs(costs)
         if self.opt.smooth_zero > 1e-4:
             select = (costs_abs >= self.opt.smooth_zero).float()
             costs_abs = costs_abs - (self.opt.smooth_zero / 2)
             costs_sq = (costs ** 2) / (self.opt.smooth_zero * 2)
-            return (select * costs_abs) + ((1.0 - select) * costs_sq)
+            return (select * costs_abs) + ((1.0 - select) * costs_sq), actions.grad
         else:
-            return costs_abs
+            return costs_abs, actions.grad
 
 
 if __name__ == '__main__':
@@ -143,8 +143,6 @@ if __name__ == '__main__':
                         help='policy entropy regularization')
     parser.add_argument('--critic_entropy_reg', type=float, default=0.0,
                         help='critic entropy regularization')
-    parser.add_argument('--max_fake_cost', type=float, default=50.0,  # TODO remove with WGAN-GP
-                        help='clip fake costs per timestep during critic training')
     parser.add_argument('--smooth_zero', type=float, default=1.0,
                         help='s, use c^2/2s instead of c-(s/2) when critic score c<s')
     parser.add_argument('--use_advantage', type=int, default=1)
@@ -160,17 +158,17 @@ if __name__ == '__main__':
                         help='conseq steps the task (if appl) has been solved for before exit')
     parser.add_argument('--solved_max_fail', type=int, default=10,
                         help='maximum number of failures before solved streak is reset')
-    parser.add_argument('--actor_optimizer', type=str, default='RMSprop')
-    parser.add_argument('--actor_learning_rate', type=float, default=5e-5)
-    parser.add_argument('--critic_optimizer', type=str, default='RMSprop')
-    parser.add_argument('--critic_learning_rate', type=float, default=5e-5)
-    parser.add_argument('--max_grad_norm', type=float, default=1.0,
+    parser.add_argument('--optimizer', type=str, default='Adam')
+    parser.add_argument('--learning_rate', type=float, default=1e-4)
+    parser.add_argument('--beta1', type=float, default=0.5)
+    parser.add_argument('--beta2', type=float, default=0.9)
+    # XXX since we're not interpolating between real/fake, should this be higher?
+    parser.add_argument('--gradient_penalty', type=float, default=10)
+    parser.add_argument('--max_grad_norm', type=float, default=5.0,
                         help='norm for gradient clipping')
-    parser.add_argument('--clamp_limit', type=float, default=-1,  # TODO remove with WGAN-GP
-                        help='critic param clamping. -1 to disable')
-    parser.add_argument('--critic_iters', type=int, default=10,  # 20 or 25 for larger tasks
+    parser.add_argument('--critic_iters', type=int, default=5,  # 20 or 25 for larger tasks
                         help='number of critic iters per turn')
-    parser.add_argument('--actor_iters', type=int, default=5,  # 15 or 20 for larger tasks
+    parser.add_argument('--actor_iters', type=int, default=1,  # 15 or 20 for larger tasks
                         help='number of actor iters per turn')
     parser.add_argument('--burnin', type=int, default=25, help='number of burnin iterations')
     parser.add_argument('--burnin_actor_iters', type=int, default=1)
@@ -230,10 +228,10 @@ if __name__ == '__main__':
     else:
         buffer = util.ReplayMemory(opt.replay_size)
 
-    actor_optimizer = getattr(optim, opt.actor_optimizer)(actor.parameters(),
-                                                          lr=opt.actor_learning_rate)
-    critic_optimizer = getattr(optim, opt.critic_optimizer)(critic.parameters(),
-                                                            lr=opt.critic_learning_rate)
+    actor_optimizer = getattr(optim, opt.optimizer)(actor.parameters(), lr=opt.learning_rate,
+                                                    betas=(opt.beta1, opt.beta2))
+    critic_optimizer = getattr(optim, opt.optimizer)(critic.parameters(), lr=opt.learning_rate,
+                                                     betas=(opt.beta1, opt.beta2))
     solved = 0
     solved_fail = 0
 
@@ -259,9 +257,6 @@ if __name__ == '__main__':
         err_f = []
         critic_gnorms = []
         for critic_i in xrange(critic_iters):
-            if opt.clamp_limit > 0:
-                for param in critic.parameters():
-                    param.data.clamp_(-opt.clamp_limit, opt.clamp_limit)
             critic.zero_grad()
 
             # eps sampling here can help the critic get signal from less likely actions as well.
@@ -271,22 +266,23 @@ if __name__ == '__main__':
             buffer.push(generated.data.cpu().numpy(), corrections.data.cpu().numpy())
             generated, corrections = buffer.sample(opt.batch_size)
             generated = torch.from_numpy(generated).cuda()
-            corrections = Variable(torch.from_numpy(corrections).cuda(), requires_grad=False)
-            costs = critic(generated).gather(2, Variable(generated.unsqueeze(2),
-                                                         requires_grad=False)).squeeze(2)
+            corrections = Variable(torch.from_numpy(corrections).cuda())
+            costs, gradient = critic(generated)
+            print(gradient)  # TODO remove
+            costs = costs.gather(2, Variable(generated.unsqueeze(2))).squeeze(2)
             entropy = -((1e-6 + costs) * torch.log(1e-6 + costs)).sum() / opt.batch_size
-            if opt.max_fake_cost > 0:
-                costs = costs.clamp(0.0, opt.max_fake_cost)
             E_generated = (costs * corrections).sum() / opt.batch_size
-            loss = -E_generated - (opt.critic_entropy_reg * entropy)
+            loss = -E_generated - (opt.critic_entropy_reg * entropy) + \
+                   (opt.gradient_penalty * gradient)  # FIXME
             loss.backward()
 
             real = torch.from_numpy(task.get_data(opt.batch_size)).cuda()
-            costs = critic(real).gather(2, Variable(real.unsqueeze(2),
-                                                    requires_grad=False)).squeeze(2)
+            costs, gradient = critic(real)
+            costs = costs.gather(2, Variable(real.unsqueeze(2))).squeeze(2)
             entropy = -((1e-6 + costs) * torch.log(1e-6 + costs)).sum() / opt.batch_size
             E_real = costs.sum() / opt.batch_size
-            loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy)
+            loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy) + \
+                   (opt.gradient_penalty * gradient)  # FIXME
             loss.backward()
 
             critic_gnorms.append(util.gradient_norm(critic.parameters()))  # TODO not needed now
@@ -318,7 +314,7 @@ if __name__ == '__main__':
             if print_generated:  # last sample is real, for debugging
                 generated.data[-1].copy_(torch.from_numpy(task.get_data(1)).cuda())
             logprobs = all_logprobs.gather(2, generated.unsqueeze(2)).squeeze(2)
-            costs = critic(generated.data)
+            costs, _ = critic(generated.data)
             if opt.use_advantage:
                 baseline = (costs * all_probs).detach().sum(2).expand_as(costs)
                 disadv = costs - baseline
