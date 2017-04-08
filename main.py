@@ -294,8 +294,7 @@ if __name__ == '__main__':
                    (opt.gradient_penalty * gradient)  # FIXME
             loss.backward()
 
-            critic_gnorms.append(util.gradient_norm(critic.parameters()))  # TODO not needed now
-            nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
+            critic_gnorms.append(nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm))
             critic_optimizer.step()
             Wdist = (E_generated - E_real).data[0]
             Wdists.append(Wdist)
