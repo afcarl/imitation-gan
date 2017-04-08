@@ -97,19 +97,26 @@ class Critic(nn.Module):
         self.zero_state = torch.zeros([opt.critic_layers, opt.batch_size,
                                        opt.critic_hidden_size]).cuda()
         self.gamma = opt.gamma
-        self.gradient_penalize = False  # TODO set True when needed during training
+        self.gradient_penalize = False
 
     def forward(self, actions):
-        padded_actions = torch.cat([self.zero_input, actions], 1)
         if self.gradient_penalize:
-            # TODO don't use padded_actions, get one hot by interpolating between real and fake
-            onehot_actions = torch.zeros(padded_actions.size() + (self.opt.vocab_size,)).cuda()
-            padded_actions.unsqueeze_(2)
-            onehot_actions.scatter_(2, padded_actions, 1)
+            # actions is tuple of (real_batch, fake_batch)
+            real, fake = actions
+            padded_real = torch.cat([self.zero_input, real], 1)
+            padded_fake = torch.cat([self.zero_input, fake], 1)
+            onehot_real = torch.zeros(padded_real.size() + (self.opt.vocab_size,)).cuda()
+            onehot_fake = torch.zeros(padded_fake.size() + (self.opt.vocab_size,)).cuda()
+            padded_real.unsqueeze_(2)
+            padded_fake.unsqueeze_(2)
+            onehot_real.scatter_(2, padded_real, 1)
+            onehot_fake.scatter_(2, padded_fake, 1)
+            onehot_actions = (onehot_real + onehot_fake) / 2
             onehot_actions = Variable(onehot_actions, requires_grad=True)
             inputs = torch.mm(onehot_actions.view(-1, self.opt.vocab_size), self.embedding.weight)
             inputs = inputs.view(onehot_actions.size(0), -1, self.opt.emb_size)
         else:
+            padded_actions = torch.cat([self.zero_input, actions], 1)
             inputs = self.embedding(Variable(padded_actions))
             onehot_actions = None
         outputs, _ = self.rnn(inputs, Variable(self.zero_state))
@@ -158,7 +165,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_advantage', type=int, default=1)
     parser.add_argument('--exp_replay_buffer', type=int, default=0,
                         help='use a replay buffer with an exponential distribution')
-    parser.add_argument('--real_multiplier', type=float, default=5.0,
+    parser.add_argument('--real_multiplier', type=float, default=1.0,
                         help='weight for real samples as compared to fake for critic learning')
     parser.add_argument('--replay_actors', type=int, default=10,  # higher with exp buffer
                         help='number of actors for experience replay')
@@ -276,23 +283,29 @@ if __name__ == '__main__':
             generated, corrections = buffer.sample(opt.batch_size)
             generated = torch.from_numpy(generated).cuda()
             corrections = Variable(torch.from_numpy(corrections).cuda())
-            costs, gradient = critic(generated)
-            print(gradient)  # TODO remove
+            costs, _ = critic(generated)
             costs = costs.gather(2, Variable(generated.unsqueeze(2))).squeeze(2)
             entropy = -((1e-6 + costs) * torch.log(1e-6 + costs)).sum() / opt.batch_size
             E_generated = (costs * corrections).sum() / opt.batch_size
-            loss = -E_generated - (opt.critic_entropy_reg * entropy) + \
-                   (opt.gradient_penalty * gradient)  # FIXME
+            loss = -E_generated - (opt.critic_entropy_reg * entropy)
             loss.backward()
 
             real = torch.from_numpy(task.get_data(opt.batch_size)).cuda()
-            costs, gradient = critic(real)
+            costs, _ = critic(real)
             costs = costs.gather(2, Variable(real.unsqueeze(2))).squeeze(2)
             entropy = -((1e-6 + costs) * torch.log(1e-6 + costs)).sum() / opt.batch_size
             E_real = costs.sum() / opt.batch_size
-            loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy) + \
-                   (opt.gradient_penalty * gradient)  # FIXME
+            loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy)
             loss.backward()
+
+            critic.gradient_penalize = True
+            costs, inputs = critic((real, generated))
+            loss = costs.sum() / opt.batch_size
+            loss.backward()
+            # TODO consider each pair individually instead of the sum. this one is incorrect.
+            loss = opt.gradient_penalty * (torch.norm(inputs.grad) - 1) ** 2
+            loss.backward()  # XXX how to do this?
+            critic.gradient_penalize = False
 
             critic_gnorms.append(nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm))
             critic_optimizer.step()
