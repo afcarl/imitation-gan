@@ -97,11 +97,21 @@ class Critic(nn.Module):
         self.zero_state = torch.zeros([opt.critic_layers, opt.batch_size,
                                        opt.critic_hidden_size]).cuda()
         self.gamma = opt.gamma
+        self.gradient_penalize = False  # TODO set True when needed during training
 
     def forward(self, actions):
-        actions = Variable(actions, requires_grad=True)
-        padded_actions = torch.cat([Variable(self.zero_input), actions], 1)
-        inputs = self.embedding(padded_actions)
+        padded_actions = torch.cat([self.zero_input, actions], 1)
+        if self.gradient_penalize:
+            # TODO don't use padded_actions, get one hot by interpolating between real and fake
+            onehot_actions = torch.zeros(padded_actions.size() + (self.opt.vocab_size,)).cuda()
+            padded_actions.unsqueeze_(2)
+            onehot_actions.scatter_(2, padded_actions, 1)
+            onehot_actions = Variable(onehot_actions, requires_grad=True)
+            inputs = torch.mm(onehot_actions.view(-1, self.opt.vocab_size), self.embedding.weight)
+            inputs = inputs.view(onehot_actions.size(0), -1, self.opt.emb_size)
+        else:
+            inputs = self.embedding(Variable(padded_actions))
+            onehot_actions = None
         outputs, _ = self.rnn(inputs, Variable(self.zero_state))
         outputs = outputs.contiguous()
         flattened = outputs.view(-1, self.opt.critic_hidden_size)
@@ -118,9 +128,9 @@ class Critic(nn.Module):
             select = (costs_abs >= self.opt.smooth_zero).float()
             costs_abs = costs_abs - (self.opt.smooth_zero / 2)
             costs_sq = (costs ** 2) / (self.opt.smooth_zero * 2)
-            return (select * costs_abs) + ((1.0 - select) * costs_sq), actions.grad
+            return (select * costs_abs) + ((1.0 - select) * costs_sq), onehot_actions
         else:
-            return costs_abs, actions.grad
+            return costs_abs, onehot_actions
 
 
 if __name__ == '__main__':
@@ -162,7 +172,6 @@ if __name__ == '__main__':
     parser.add_argument('--learning_rate', type=float, default=1e-4)
     parser.add_argument('--beta1', type=float, default=0.5)
     parser.add_argument('--beta2', type=float, default=0.9)
-    # XXX since we're not interpolating between real/fake, should this be higher?
     parser.add_argument('--gradient_penalty', type=float, default=10)
     parser.add_argument('--max_grad_norm', type=float, default=5.0,
                         help='norm for gradient clipping')
