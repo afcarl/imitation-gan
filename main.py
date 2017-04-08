@@ -111,7 +111,8 @@ class Critic(nn.Module):
             padded_fake.unsqueeze_(2)
             onehot_real.scatter_(2, padded_real, 1)
             onehot_fake.scatter_(2, padded_fake, 1)
-            onehot_actions = (onehot_real + onehot_fake) / 2
+            alpha = torch.rand(real.size(0)).unsqueeze(1).unsqueeze(2).expand_as(onehot_real).cuda()
+            onehot_actions = (alpha * onehot_real) + ((1 - alpha) * onehot_fake)
             onehot_actions = Variable(onehot_actions, requires_grad=True)
             inputs = torch.mm(onehot_actions.view(-1, self.opt.vocab_size), self.embedding.weight)
             inputs = inputs.view(onehot_actions.size(0), -1, self.opt.emb_size)
@@ -301,7 +302,7 @@ if __name__ == '__main__':
             critic.gradient_penalize = True
             costs, inputs = critic((real, generated))
             loss = costs.sum() / opt.batch_size
-            loss.backward()
+            loss.backward(retain_variables=True)
             # TODO consider each pair individually instead of the sum. this one is incorrect.
             loss = opt.gradient_penalty * (torch.norm(inputs.grad) - 1) ** 2
             loss.backward()  # XXX how to do this?
