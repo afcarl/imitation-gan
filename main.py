@@ -143,6 +143,8 @@ if __name__ == '__main__':
                         help='epsilon for eps sampling. results in biased policy gradient')
     parser.add_argument('--eps_for_critic', type=int, default=0,
                         help='enable eps sampling of actor during critic training')
+    parser.add_argument('--actor_optimize_all', type=int, default=0,
+                        help='optimize all actions per timestep (not only the selected ones)')
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--gamma_inc', type=float, default=0.0,
                         help='the amount by which to increase gamma at each turn')
@@ -340,12 +342,18 @@ if __name__ == '__main__':
                 disadv = costs - baseline
             else:
                 disadv = costs
-            # TODO why gather? we have all costs over all actions, and also the policy distribution
-            #      over all actions. we can just multiply them together to learn for all actions
-            #      together! will create a biased policy gradient though.
-            costs = costs.gather(2, generated.unsqueeze(2)).squeeze(2)
-            disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
-            loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
+            if opt.actor_optimize_all:
+                # consider all possible actions at each timestep and optimize to maximize critic
+                # reward such that each action was equally likely. this will produce a biased policy
+                # gradient, but provides much more training signal, possibly helping train faster.
+                # TODO get this to work. perhaps think of a gentler bias? for example, something
+                #      based on the current policy itself instead of uniform.
+                loss = (disadv * all_logprobs).sum() / \
+                       (opt.vocab_size * (opt.batch_size - int(print_generated)))
+                disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
+            else:
+                disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
+                loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
             entropy = -(all_probs * all_logprobs).sum() / (opt.batch_size - int(print_generated))
             loss -= opt.entropy_reg * entropy
             loss.backward()
@@ -353,16 +361,17 @@ if __name__ == '__main__':
             nn.utils.clip_grad_norm(actor.parameters(), opt.max_grad_norm)
             actor_optimizer.step()
             if print_generated:
+                costs = all_costs.gather(2, all_generated.unsqueeze(2)).squeeze(2)
                 # print generated only in the first actor iteration
                 print('Generated (last row is real):')
                 task.display(all_generated.data.cpu().numpy())
                 print()
                 print('Critic costs (last row is real):')
-                print(all_costs.data.cpu().numpy(), '\n')
-                print('Critic cost sums (last is real):')
-                print(all_costs.data.cpu().numpy().sum(1), '\n')
+                print(costs.data.cpu().numpy(), '\n')
+                print('Critic cost sums (last element is real):')
+                print(costs.data.cpu().numpy().sum(1), '\n')
                 if opt.use_advantage:
-                    print('Critic advantages (last row is real):')
+                    print('Critic advantages (real not included):')
                     print(-disadv.data.cpu().numpy(), '\n')
                 if opt.task == 'longterm':
                     print('Batch-averaged step-wise probs:')
