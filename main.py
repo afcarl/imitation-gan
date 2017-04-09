@@ -153,7 +153,7 @@ if __name__ == '__main__':
                         help='the amount by which to increase gamma at each turn')
     parser.add_argument('--entropy_reg', type=float, default=1.0,
                         help='policy entropy regularization')
-    parser.add_argument('--critic_entropy_reg', type=float, default=0.0,
+    parser.add_argument('--critic_entropy_reg', type=float, default=0.0,  # <= 1e-3
                         help='critic entropy regularization')
     parser.add_argument('--critic_abs', type=int, default=1,  # FIXME nans from entropy when 0
                         help='ensure critic cost is positive by using absolute values')
@@ -278,16 +278,16 @@ if __name__ == '__main__':
             generated = buffer.sample(opt.batch_size)
             generated = torch.from_numpy(generated).cuda()
             costs, _ = critic(generated)
-            costs = costs.gather(2, Variable(generated.unsqueeze(2))).squeeze(2)
             entropy = -((1e-6 + costs) * torch.log(1e-6 + costs)).sum() / opt.batch_size
+            costs = costs.gather(2, Variable(generated.unsqueeze(2))).squeeze(2)
             E_generated = costs.sum() / opt.batch_size
             loss = -E_generated - (opt.critic_entropy_reg * entropy)
             loss.backward()
 
             real = torch.from_numpy(task.get_data(opt.batch_size)).cuda()
             costs, _ = critic(real)
-            costs = costs.gather(2, Variable(real.unsqueeze(2))).squeeze(2)
             entropy = -((1e-6 + costs) * torch.log(1e-6 + costs)).sum() / opt.batch_size
+            costs = costs.gather(2, Variable(real.unsqueeze(2))).squeeze(2)
             E_real = costs.sum() / opt.batch_size
             loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy)
             loss.backward()
