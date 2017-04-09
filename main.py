@@ -51,19 +51,16 @@ class Actor(nn.Module):
             all_logprobs.append(dist.unsqueeze(1))
             prob = torch.exp(dist)
             all_probs.append(prob.unsqueeze(1))
-            dist_new = dist.detach()
+            prob_new = prob.detach()
             probs.append(prob.data.mean(0).squeeze(0).cpu().numpy())  # for debugging
             # eps sampling
             if self.eps_sample:
-                dist_new = dist_new.clone()
+                prob_new = prob_new.clone()
                 draw_randomly = self.opt.eps >= torch.rand([self.opt.batch_size])
-                draw_randomly = draw_randomly.byte().unsqueeze(1).cuda().expand_as(dist_new)
+                draw_randomly = draw_randomly.byte().unsqueeze(1).cuda().expand_as(prob_new)
                 # set uniform distribution with opt.eps probability
-                dist_new[draw_randomly] = -np.log(self.opt.vocab_size)
-            # torch.multinomial is broken, so this is the workaround  TODO change now
-            _, sampled = torch.max(dist_new.data -
-                                   torch.log(-torch.log(torch.rand(*dist_new.size()).cuda())), 1)
-            sampled = Variable(sampled)
+                prob_new[draw_randomly] = 1 / self.opt.vocab_size
+            sampled = torch.multinomial(prob_new, 1)
             outputs.append(sampled)
             if out_i < self.opt.seq_len - 1:
                 inputs = self.embedding(sampled.squeeze(1))
