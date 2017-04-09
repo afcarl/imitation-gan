@@ -146,10 +146,10 @@ if __name__ == '__main__':
     parser.add_argument('--niter', type=int, default=1000000, help='number of iters to train for')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
     parser.add_argument('--seq_len', type=int, default=20, help='toy sequence length')
-    parser.add_argument('--vocab_size', type=int, default=200, help='vocab size for data')
-    parser.add_argument('--emb_size', type=int, default=160, help='embedding size')
-    parser.add_argument('--actor_hidden_size', type=int, default=224, help='Actor RNN hidden size')
-    parser.add_argument('--critic_hidden_size', type=int, default=224,
+    parser.add_argument('--vocab_size', type=int, default=60, help='vocab size for data')
+    parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
+    parser.add_argument('--actor_hidden_size', type=int, default=512, help='Actor RNN hidden size')
+    parser.add_argument('--critic_hidden_size', type=int, default=512,
                         help='Critic RNN hidden size')
     parser.add_argument('--critic_layers', type=int, default=1)  # TODO add actor_layers
     parser.add_argument('--critic_dropout', type=float, default=0.0)  # TODO add actor_dropout
@@ -193,7 +193,7 @@ if __name__ == '__main__':
     parser.add_argument('--name', type=str, default='default')
     parser.add_argument('--task', type=str, default='lm', help='one of lm/longterm/words')
     parser.add_argument('--lm_data_dir', type=str, default='data/penn')
-    parser.add_argument('--lm_char', type=int, default=0, help='1 for character level model')
+    parser.add_argument('--lm_char', type=int, default=1, help='1 for character level model')
     parser.add_argument('--print_every', type=int, default=25,
                         help='print losses every these many steps')
     parser.add_argument('--plot_every', type=int, default=1,
@@ -299,14 +299,14 @@ if __name__ == '__main__':
             loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy)
             loss.backward()
 
-            critic.gradient_penalize = True
-            costs, inputs = critic((real, generated))
-            loss = costs.sum() / opt.batch_size
-            loss.backward(Variable(torch.ones(1).cuda(), requires_grad=True), retain_variables=True)
-            # TODO consider each pair individually instead of the sum. this one is incorrect.
-            loss = opt.gradient_penalty * (torch.norm(inputs.grad) - 1) ** 2
-            loss.backward()  # FIXME this doesn't work on pytorch yet
-            critic.gradient_penalize = False
+#            critic.gradient_penalize = True
+#            costs, inputs = critic((real, generated))
+#            loss = costs.sum() / opt.batch_size
+#            loss.backward(Variable(torch.ones(1).cuda(), requires_grad=True), retain_variables=True)
+#            # TODO consider each pair individually instead of the sum. this one is incorrect.
+#            loss = opt.gradient_penalty * (torch.norm(inputs.grad) - 1) ** 2
+#            loss.backward()  # FIXME this doesn't work on pytorch yet
+#            critic.gradient_penalize = False
 
             critic_gnorms.append(nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm))
             critic_optimizer.step()
