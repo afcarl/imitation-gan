@@ -36,11 +36,10 @@ class Actor(nn.Module):
         self.embedding.weight = self.dist2.weight  # tie weights
         self.zero_input = torch.LongTensor(opt.batch_size).zero_().cuda()
         self.zero_state = torch.zeros([opt.batch_size, opt.actor_hidden_size]).cuda()
-        self.eps_sample = True  # do eps sampling
+        self.eps_sample = False  # do eps sampling
 
     def forward(self):
         outputs = []
-        corrections = []
         all_logprobs = []
         all_probs = []
         probs = []  # for debugging
@@ -65,21 +64,11 @@ class Actor(nn.Module):
             _, sampled = torch.max(dist_new.data -
                                    torch.log(-torch.log(torch.rand(*dist_new.size()).cuda())), 1)
             sampled = Variable(sampled)
-            onpolicy_prob = prob.gather(1, sampled).detach()
-            if self.eps_sample:
-                offpolicy_prob = torch.exp(dist_new.gather(1, sampled))
-            else:
-                offpolicy_prob = onpolicy_prob
-            # avoid 0/0
-            onpolicy_prob = onpolicy_prob.clamp(1e-8, 1.0)
-            offpolicy_prob = offpolicy_prob.clamp(1e-8, 1.0)
             outputs.append(sampled)
-            # use importance sampling to correct for eps sampling
-            corrections.append(onpolicy_prob / offpolicy_prob)
             if out_i < self.opt.seq_len - 1:
                 inputs = self.embedding(sampled.squeeze(1))
-        return (torch.cat(outputs, 1), torch.cat(corrections, 1), torch.cat(all_logprobs, 1),
-                torch.cat(all_probs, 1), np.array(probs))
+        return (torch.cat(outputs, 1), torch.cat(all_logprobs, 1), torch.cat(all_probs, 1),
+                np.array(probs))
 
 
 class Critic(nn.Module):
@@ -153,7 +142,10 @@ if __name__ == '__main__':
                         help='Critic RNN hidden size')
     parser.add_argument('--critic_layers', type=int, default=1)  # TODO add actor_layers
     parser.add_argument('--critic_dropout', type=float, default=0.0)  # TODO add actor_dropout
-    parser.add_argument('--eps', type=float, default=0.0, help='epsilon for eps sampling')
+    parser.add_argument('--eps', type=float, default=0.0,
+                        help='epsilon for eps sampling. results in biased policy gradient')
+    parser.add_argument('--eps_for_critic', type=int, default=0,
+                        help='enable eps sampling of actor during critic training')
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--gamma_inc', type=float, default=0.0,
                         help='the amount by which to increase gamma at each turn')
@@ -260,7 +252,7 @@ if __name__ == '__main__':
         if solved >= opt.solved_threshold:
             print('%d: Task solved, exiting.' % cur_iter)
             break
-        actor.eps_sample = opt.eps > 1e-8
+        actor.eps_sample = bool(opt.eps_for_critic) and opt.eps > 1e-8
 
         # train critic
         for param in critic.parameters():  # reset requires_grad
@@ -276,18 +268,14 @@ if __name__ == '__main__':
         for critic_i in xrange(critic_iters):
             critic.zero_grad()
 
-            # eps sampling here can help the critic get signal from less likely actions as well.
-            # corrections would ensure that the critic doesn't have to worry about such actions
-            # too much though.
-            generated, corrections, _, _, _ = actor()
-            buffer.push(generated.data.cpu().numpy(), corrections.data.cpu().numpy())
-            generated, corrections = buffer.sample(opt.batch_size)
+            generated, _, _, _ = actor()
+            buffer.push(generated.data.cpu().numpy())
+            generated = buffer.sample(opt.batch_size)
             generated = torch.from_numpy(generated).cuda()
-            corrections = Variable(torch.from_numpy(corrections).cuda())
             costs, _ = critic(generated)
             costs = costs.gather(2, Variable(generated.unsqueeze(2))).squeeze(2)
             entropy = -((1e-6 + costs) * torch.log(1e-6 + costs)).sum() / opt.batch_size
-            E_generated = (costs * corrections).sum() / opt.batch_size
+            E_generated = costs.sum() / opt.batch_size
             loss = -E_generated - (opt.critic_entropy_reg * entropy)
             loss.backward()
 
@@ -329,13 +317,15 @@ if __name__ == '__main__':
             actor.eps_sample = False
         else:
             print_generated = False
+            actor.eps_sample = opt.eps > 1e-8
 
         actor_gnorms = []
         for actor_i in xrange(actor_iters):
             actor.zero_grad()
-            generated, corrections, all_logprobs, all_probs, avgprobs = actor()
+            generated, all_logprobs, all_probs, avgprobs = actor()
             if print_generated:  # last sample is real, for debugging
                 generated.data[-1].copy_(torch.from_numpy(task.get_data(1)).cuda())
+                # TODO don't train on last sample!
             logprobs = all_logprobs.gather(2, generated.unsqueeze(2)).squeeze(2)
             costs, _ = critic(generated.data)
             if opt.use_advantage:
@@ -344,7 +334,6 @@ if __name__ == '__main__':
             else:
                 disadv = costs
             if print_generated:  # do not train on real sample
-                corrections[-1].data.zero_()
                 all_logprobs = all_logprobs[:-1]
                 all_probs = all_probs[:-1]
             # TODO why gather? we have all costs over all actions, and also the policy distribution
@@ -352,7 +341,7 @@ if __name__ == '__main__':
             #      together!
             costs = costs.gather(2, generated.unsqueeze(2)).squeeze(2)
             disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
-            loss = (disadv * corrections * logprobs).sum() / opt.batch_size
+            loss = (disadv * logprobs).sum() / opt.batch_size
             entropy = -(all_probs * all_logprobs).sum() / opt.batch_size
             loss -= opt.entropy_reg * entropy
             loss.backward()

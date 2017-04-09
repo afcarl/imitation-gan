@@ -17,19 +17,19 @@ class ReplayMemory(object):
         self.memory = []
         self.position = 0
 
-    def push(self, generations, corrections):
+    def push(self, generations):
         for i in xrange(generations.shape[0]):
-            self._push(generations[i], corrections[i])
+            self._push(generations[i])
 
-    def _push(self, generation, correction):
+    def _push(self, generation):
         if len(self.memory) < self.capacity:
             self.memory.append(None)
-        self.memory[self.position] = (generation, correction)
+        self.memory[self.position] = generation
         self.position = (self.position + 1) % self.capacity
 
     def sample(self, batch_size):
-        generations, corrections = zip(*random.sample(self.memory, batch_size))
-        return np.array(generations), np.array(corrections)
+        generations = random.sample(self.memory, batch_size)
+        return np.array(generations)
 
     def __len__(self):
         return len(self.memory)
@@ -42,12 +42,12 @@ class ExponentialReplayMemory(object):
         exp_lambda = np.log(2) / half
         self.probs = np.array([exp_lambda * np.exp(-exp_lambda * i) for i in xrange(capacity)])
 
-    def push(self, generations, corrections):
+    def push(self, generations):
         for i in xrange(generations.shape[0]):
-            self._push(generations[i], corrections[i])
+            self._push(generations[i])
 
-    def _push(self, generation, correction):
-        self.memory.insert(0, (generation, correction))
+    def _push(self, generation):
+        self.memory.insert(0, generation)
         if len(self.memory) > self.capacity:
             self.memory.pop()
 
@@ -55,8 +55,8 @@ class ExponentialReplayMemory(object):
         probs = self.probs[:len(self.memory)]
         probs /= probs.sum()
         indices = np.random.choice(len(self.memory), size=batch_size, replace=False, p=probs)
-        generations, corrections = zip(*[self.memory[i] for i in indices])
-        return np.array(generations), np.array(corrections)
+        generations = [self.memory[i] for i in indices]
+        return np.array(generations)
 
     def __len__(self):
         return len(self.memory)
