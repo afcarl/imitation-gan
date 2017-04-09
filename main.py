@@ -308,7 +308,8 @@ if __name__ == '__main__':
 #            loss.backward()  # FIXME this doesn't work on pytorch yet
 #            critic.gradient_penalize = False
 
-            critic_gnorms.append(nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm))
+            critic_gnorms.append(util.gradient_norm(critic.parameters()))
+            nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
             critic_optimizer.step()
             Wdist = (E_generated - E_real).data[0]
             Wdists.append(Wdist)
