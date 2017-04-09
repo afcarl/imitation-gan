@@ -302,10 +302,10 @@ if __name__ == '__main__':
             critic.gradient_penalize = True
             costs, inputs = critic((real, generated))
             loss = costs.sum() / opt.batch_size
-            loss.backward(retain_variables=True)
+            loss.backward(Variable(torch.ones(1).cuda(), requires_grad=True), retain_variables=True)
             # TODO consider each pair individually instead of the sum. this one is incorrect.
             loss = opt.gradient_penalty * (torch.norm(inputs.grad) - 1) ** 2
-            loss.backward()  # XXX how to do this?
+            loss.backward()  # FIXME this doesn't work on pytorch yet
             critic.gradient_penalize = False
 
             critic_gnorms.append(nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm))
@@ -346,6 +346,9 @@ if __name__ == '__main__':
                 corrections[-1].data.zero_()
                 all_logprobs = all_logprobs[:-1]
                 all_probs = all_probs[:-1]
+            # TODO why gather? we have all costs over all actions, and also the policy distribution
+            #      over all actions. we can just multiply them together to learn for all actions
+            #      together!
             costs = costs.gather(2, generated.unsqueeze(2)).squeeze(2)
             disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
             loss = (disadv * corrections * logprobs).sum() / opt.batch_size
