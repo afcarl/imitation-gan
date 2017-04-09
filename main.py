@@ -236,10 +236,11 @@ if __name__ == '__main__':
     else:
         buffer = util.ReplayMemory(opt.replay_size)
 
-    actor_optimizer = getattr(optim, opt.optimizer)(actor.parameters(), lr=opt.learning_rate,
-                                                    betas=(opt.beta1, opt.beta2))
-    critic_optimizer = getattr(optim, opt.optimizer)(critic.parameters(), lr=opt.learning_rate,
-                                                     betas=(opt.beta1, opt.beta2))
+    kwargs = {'lr': opt.learning_rate}
+    if opt.optimizer == 'Adam':
+        kwargs['betas'] = (opt.beta1, opt.beta2)
+    actor_optimizer = getattr(optim, opt.optimizer)(actor.parameters(), **kwargs)
+    critic_optimizer = getattr(optim, opt.optimizer)(critic.parameters(), **kwargs)
     solved = 0
     solved_fail = 0
 
@@ -343,13 +344,12 @@ if __name__ == '__main__':
             else:
                 disadv = costs
             if opt.actor_optimize_all:
-                # consider all possible actions at each timestep and optimize to maximize critic
-                # reward such that each action was equally likely. this will produce a biased policy
-                # gradient, but provides much more training signal, possibly helping train faster.
-                # TODO get this to work. perhaps think of a gentler bias? for example, something
-                #      based on the current policy itself instead of uniform.
-                loss = (disadv * all_logprobs).sum() / \
-                       (opt.vocab_size * (opt.batch_size - int(print_generated)))
+                # consider all possible actions at each timestep. this provides much more training
+                # signal, possibly helping train faster. however, critic errors on less likely
+                # actions can have a worse effect on actor training as compared to considering only
+                # the selected action.
+                loss = (all_probs.detach() * disadv * all_logprobs).sum() / \
+                       (opt.batch_size - int(print_generated))
                 disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
             else:
                 disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
