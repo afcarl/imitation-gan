@@ -117,17 +117,14 @@ class Critic(nn.Module):
             discount = discount.unsqueeze(0).expand(self.opt.batch_size, self.opt.seq_len)
             discount = Variable(discount)
             costs = costs * discount
-        if self.opt.critic_abs:
-            costs_abs = torch.abs(costs)
-            if self.opt.smooth_zero > 1e-4:
-                select = (costs_abs >= self.opt.smooth_zero).float()
-                costs_abs = costs_abs - (self.opt.smooth_zero / 2)
-                costs_sq = (costs ** 2) / (self.opt.smooth_zero * 2)
-                return (select * costs_abs) + ((1.0 - select) * costs_sq), onehot_actions
-            else:
-                return costs_abs, onehot_actions
+        costs_abs = torch.abs(costs)
+        if self.opt.smooth_zero > 1e-4:
+            select = (costs_abs >= self.opt.smooth_zero).float()
+            costs_abs = costs_abs - (self.opt.smooth_zero / 2)
+            costs_sq = (costs ** 2) / (self.opt.smooth_zero * 2)
+            return (select * costs_abs) + ((1.0 - select) * costs_sq), onehot_actions
         else:
-            return costs, onehot_actions
+            return costs_abs, onehot_actions
 
 
 if __name__ == '__main__':
@@ -155,8 +152,6 @@ if __name__ == '__main__':
                         help='policy entropy regularization')
     parser.add_argument('--critic_entropy_reg', type=float, default=0.0,  # <= 1e-3
                         help='critic entropy regularization')
-    parser.add_argument('--critic_abs', type=int, default=1,  # FIXME nans from entropy when 0
-                        help='ensure critic cost is positive by using absolute values')
     parser.add_argument('--smooth_zero', type=float, default=1.0,
                         help='s, use c^2/2s instead of c-(s/2) when abs critic score c<s')
     parser.add_argument('--use_advantage', type=int, default=1)
