@@ -320,27 +320,33 @@ if __name__ == '__main__':
         actor_gnorms = []
         for actor_i in xrange(actor_iters):
             actor.zero_grad()
-            generated, all_logprobs, all_probs, avgprobs = actor()
-            if print_generated:  # last sample is real, for debugging
-                generated.data[-1].copy_(torch.from_numpy(task.get_data(1)).cuda())
-                # TODO don't train on last sample!
+            all_generated, all_logprobs, all_probs, avgprobs = actor()
+            if print_generated:  # last sample is real, for debugging. do not train on it!
+                all_generated = torch.cat([all_generated[:-1],
+                                           torch.from_numpy(task.get_data(1)).cuda()], 0)
+                all_logprobs = all_logprobs[:-1]
+                all_probs = all_probs[:-1]
+                generated = all_generated[:-1]
+            else:
+                generated = all_generated
             logprobs = all_logprobs.gather(2, generated.unsqueeze(2)).squeeze(2)
-            costs, _ = critic(generated.data)
+            all_costs, _ = critic(all_generated.data)
+            if print_generated:
+                costs = all_costs[:-1]
+            else:
+                costs = all_costs
             if opt.use_advantage:
                 baseline = (costs * all_probs).detach().sum(2).expand_as(costs)
                 disadv = costs - baseline
             else:
                 disadv = costs
-            if print_generated:  # do not train on real sample
-                all_logprobs = all_logprobs[:-1]
-                all_probs = all_probs[:-1]
             # TODO why gather? we have all costs over all actions, and also the policy distribution
             #      over all actions. we can just multiply them together to learn for all actions
-            #      together!
+            #      together! will create a biased policy gradient though.
             costs = costs.gather(2, generated.unsqueeze(2)).squeeze(2)
             disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
-            loss = (disadv * logprobs).sum() / opt.batch_size
-            entropy = -(all_probs * all_logprobs).sum() / opt.batch_size
+            loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
+            entropy = -(all_probs * all_logprobs).sum() / (opt.batch_size - int(print_generated))
             loss -= opt.entropy_reg * entropy
             loss.backward()
             actor_gnorms.append(util.gradient_norm(actor.parameters()))
@@ -348,15 +354,15 @@ if __name__ == '__main__':
             actor_optimizer.step()
             if print_generated:
                 # print generated only in the first actor iteration
-                print('Generated:')
-                task.display(generated.data.cpu().numpy())
+                print('Generated (last row is real):')
+                task.display(all_generated.data.cpu().numpy())
                 print()
-                print('Critic costs:')
-                print(costs.data.cpu().numpy(), '\n')
-                print('Critic cost sums:')
-                print(costs.data.cpu().numpy().sum(1), '\n')
+                print('Critic costs (last row is real):')
+                print(all_costs.data.cpu().numpy(), '\n')
+                print('Critic cost sums (last is real):')
+                print(all_costs.data.cpu().numpy().sum(1), '\n')
                 if opt.use_advantage:
-                    print('Critic advantages:')
+                    print('Critic advantages (last row is real):')
                     print(-disadv.data.cpu().numpy(), '\n')
                 if opt.task == 'longterm':
                     print('Batch-averaged step-wise probs:')
