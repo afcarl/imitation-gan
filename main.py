@@ -174,6 +174,8 @@ if __name__ == '__main__':
     parser.add_argument('--gradient_penalty', type=float, default=10)
     parser.add_argument('--max_grad_norm', type=float, default=5.0,
                         help='norm for gradient clipping')
+    parser.add_argument('--clamp_limit', type=float, default=-1,  # TODO remove with WGAN-GP
+                        help='critic param clamping. -1 to disable')
     parser.add_argument('--critic_iters', type=int, default=5,  # 20 or 25 for larger tasks
                         help='number of critic iters per turn')
     parser.add_argument('--actor_iters', type=int, default=1,  # 15 or 20 for larger tasks
@@ -266,6 +268,9 @@ if __name__ == '__main__':
         err_f = []
         critic_gnorms = []
         for critic_i in xrange(critic_iters):
+            if opt.clamp_limit > 0:  # TODO remove with WGAN-GP
+                for param in critic.parameters():
+                    param.data.clamp_(-opt.clamp_limit, opt.clamp_limit)
             critic.zero_grad()
 
             generated, _, _, _ = actor()
@@ -287,6 +292,7 @@ if __name__ == '__main__':
             loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy)
             loss.backward()
 
+#           TODO enable with WGAN-GP:
 #            critic.gradient_penalize = True
 #            costs, inputs = critic((real, generated))
 #            loss = costs.sum() / opt.batch_size
