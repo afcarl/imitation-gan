@@ -68,7 +68,7 @@ def _linear(args, output_size, bias=True, bias_start=0.0, scope=None, initialize
 class ActorCell(tf.contrib.rnn.RNNCell):
     """Gated Recurrent Unit cell (cf. http://arxiv.org/abs/1406.1078)."""
 
-    def __init__(self, num_units, activation=tanh, reuse=None):
+    def __init__(self, num_units, activation=tf.tanh, reuse=None):
         self._num_units = num_units
         self._activation = activation
         self._reuse = reuse
@@ -94,7 +94,7 @@ class ActorCell(tf.contrib.rnn.RNNCell):
         return new_h, new_h
 
 
-class Actor(nn.Module):
+class Actor(object):
     '''The imitation GAN policy network.'''
 
     def __init__(self, opt):
@@ -112,26 +112,29 @@ class Actor(nn.Module):
         probs = []  # for debugging
         hidden = self.cell.zero_state(self.opt.batch_size, tf.float32)
         inputs = tf.zeros([self.opt.batch_size], dtype=tf.int32)
-        for out_i in xrange(self.opt.seq_len):
-            hidden, _ = self.cell(inputs, hidden)
-            dist = tf.nn.log_softmax(_linear(hidden, opt.vocab_size))
-            all_logprobs.append(dist.unsqueeze(1))
-            prob = torch.exp(dist)
-            all_probs.append(prob.unsqueeze(1))
-            prob_new = prob.detach()
-            probs.append(prob.data.mean(0).squeeze(0).cpu().numpy())  # for debugging
-            sampled = torch.multinomial(prob_new, 1)
-            outputs.append(sampled)
-            if out_i < self.opt.seq_len - 1:
-                inputs = self.embedding(sampled.squeeze(1))
+        with tf.variable_scope('recurrence') as scope:
+            for out_i in xrange(self.opt.seq_len):
+                hidden, _ = self.cell(inputs, hidden)
+                dist = tf.nn.log_softmax(_linear(hidden, opt.vocab_size))
+                print(dist.get_shape())  # FIXME
+                all_logprobs.append(dist.unsqueeze(1))
+                prob = torch.exp(dist)
+                all_probs.append(prob.unsqueeze(1))
+                prob_new = prob.detach()
+                probs.append(prob.data.mean(0).squeeze(0).cpu().numpy())  # for debugging
+                sampled = torch.multinomial(prob_new, 1)
+                outputs.append(sampled)
+                if out_i < self.opt.seq_len - 1:
+                    inputs = self.embedding(sampled.squeeze(1))
+                scope.reuse_variables()
         return (torch.cat(outputs, 1), torch.cat(all_logprobs, 1), torch.cat(all_probs, 1),
                 np.array(probs))
 
 
-class Critic(nn.Module):
+class Critic(object):
     '''The imitation GAN discriminator/critic.'''
 
-    def __init__(self, opt):
+    def __init__(self, opt, gradient_penalize):
         super(Critic, self).__init__()
         self.opt = opt
         self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
@@ -143,14 +146,17 @@ class Critic(nn.Module):
         self.zero_state = torch.zeros([opt.critic_layers, opt.batch_size,
                                        opt.critic_hidden_size]).cuda()
         self.gamma = opt.gamma
-        self.gradient_penalize = False
+        self.gradient_penalize = gradient_penalize
+        if gradient_penalize:
+            self.real = tf.placeholder()  # FIXME
+            self.fake = tf.placeholder()  # FIXME
+        else:
+            self.actions = tf.placeholder()  # FIXME
 
-    def forward(self, actions):
+    def forward(self):
         if self.gradient_penalize:
-            # actions is tuple of (real_batch, fake_batch)
-            real, fake = actions
-            padded_real = torch.cat([self.zero_input, real], 1)
-            padded_fake = torch.cat([self.zero_input, fake], 1)
+            padded_real = torch.cat([self.zero_input, self.real], 1)
+            padded_fake = torch.cat([self.zero_input, self.fake], 1)
             onehot_real = torch.zeros(padded_real.size() + (self.opt.vocab_size,)).cuda()
             onehot_fake = torch.zeros(padded_fake.size() + (self.opt.vocab_size,)).cuda()
             padded_real.unsqueeze_(2)
@@ -163,7 +169,7 @@ class Critic(nn.Module):
             inputs = torch.mm(onehot_actions.view(-1, self.opt.vocab_size), self.embedding.weight)
             inputs = inputs.view(onehot_actions.size(0), -1, self.opt.emb_size)
         else:
-            padded_actions = torch.cat([self.zero_input, actions], 1)
+            padded_actions = torch.cat([self.zero_input, self.actions], 1)
             inputs = self.embedding(Variable(padded_actions))
             onehot_actions = None
         outputs, _ = self.rnn(inputs, Variable(self.zero_state))
@@ -234,8 +240,6 @@ if __name__ == '__main__':
     parser.add_argument('--gradient_penalty', type=float, default=10)
     parser.add_argument('--max_grad_norm', type=float, default=5.0,
                         help='norm for gradient clipping')
-    parser.add_argument('--clamp_limit', type=float, default=-1,  # TODO remove with WGAN-GP
-                        help='critic param clamping. -1 to disable')
     parser.add_argument('--critic_iters', type=int, default=5,  # 20 or 25 for larger tasks
                         help='number of critic iters per turn')
     parser.add_argument('--actor_iters', type=int, default=1,  # 15 or 20 for larger tasks
@@ -286,8 +290,12 @@ if __name__ == '__main__':
         print('error: invalid task name:', opt.task)
         sys.exit(1)
 
-    actor = Actor(opt)
-    critic = Critic(opt)
+    with tf.variable_scope('Actor'):
+        actor = Actor(opt)
+    with tf.variable_scope('Critic') as scope:
+        critic = Critic(opt, False)
+        scope.reuse_variables()
+        gp_critic = Critic(opt, True)
 
     assert opt.replay_size >= opt.batch_size
     if opt.exp_replay_buffer:
@@ -295,11 +303,14 @@ if __name__ == '__main__':
     else:
         buffer = util.ReplayMemory(opt.replay_size)
 
-    kwargs = {'lr': opt.learning_rate}
     if opt.optimizer == 'Adam':
-        kwargs['betas'] = (opt.beta1, opt.beta2)
-    actor_optimizer = getattr(optim, opt.optimizer)(actor.parameters(), **kwargs)
-    critic_optimizer = getattr(optim, opt.optimizer)(critic.parameters(), **kwargs)
+        actor_optimizer = tf.train.AdamOptimizer(opt.learning_rate, beta1=opt.beta1,
+                                                 beta2=opt.beta2)
+        critic_optimizer = tf.train.AdamOptimizer(opt.learning_rate, beta1=opt.beta1,
+                                                  beta2=opt.beta2)
+    elif opt.optimizer == 'RMSprop':
+        actor_optimizer = tf.train.AdamOptimizer(opt.learning_rate)
+        critic_optimizer = tf.train.AdamOptimizer(opt.learning_rate)
     solved = 0
     solved_fail = 0
 
@@ -325,9 +336,6 @@ if __name__ == '__main__':
         err_f = []
         critic_gnorms = []
         for critic_i in xrange(critic_iters):
-            if opt.clamp_limit > 0:  # TODO remove with WGAN-GP
-                for param in critic.parameters():
-                    param.data.clamp_(-opt.clamp_limit, opt.clamp_limit)
             critic.zero_grad()
 
             generated, _, _, _ = actor()
@@ -349,16 +357,13 @@ if __name__ == '__main__':
             loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy)
             loss.backward()
 
-#           TODO enable with WGAN-GP:
-#            critic.gradient_penalize = True
-#            costs, inputs = critic((real, generated))
-#            loss = costs.sum() / opt.batch_size
-#            loss.backward(Variable(torch.ones(1).cuda(), requires_grad=True),
-#                          retain_variables=True)
-#            # TODO consider each pair individually instead of the sum. this one is incorrect.
-#            loss = opt.gradient_penalty * (torch.norm(inputs.grad) - 1) ** 2
-#            loss.backward()  # FIXME this doesn't work on pytorch yet
-#            critic.gradient_penalize = False
+            costs, inputs = gp_critic((real, generated))
+            loss = costs.sum() / opt.batch_size
+            loss.backward(Variable(torch.ones(1).cuda(), requires_grad=True),
+                          retain_variables=True)
+            # TODO consider each pair individually instead of the sum. this one is incorrect.
+            loss = opt.gradient_penalty * (torch.norm(inputs.grad) - 1) ** 2
+            loss.backward()  # FIXME this doesn't work on pytorch yet
 
             critic_gnorms.append(util.gradient_norm(critic.parameters()))
             nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
