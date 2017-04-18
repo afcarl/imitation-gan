@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import argparse
+import math
 import os
 from six.moves import xrange
 import sys
@@ -65,44 +66,17 @@ def _linear(args, output_size, bias=True, bias_start=0.0, scope=None, initialize
     return res + bias_term
 
 
-class ActorCell(tf.contrib.rnn.RNNCell):
-    """Gated Recurrent Unit cell (cf. http://arxiv.org/abs/1406.1078)."""
-
-    def __init__(self, num_units, activation=tf.tanh, reuse=None):
-        self._num_units = num_units
-        self._activation = activation
-        self._reuse = reuse
-
-    @property
-    def state_size(self):
-        return self._num_units
-
-    @property
-    def output_size(self):
-        return self._num_units
-
-    def __call__(self, inputs, state, scope=None):
-        """Gated recurrent unit (GRU) with nunits cells."""
-        with tf.variable_scope(scope or "gru_cell", reuse=self._reuse):
-            with tf.variable_scope("gates"):  # Reset gate and update gate.
-                # We start with bias of 1.0 to not reset and not update.
-                value = sigmoid(_linear([inputs, state], 2 * self._num_units, True, 1.0))
-                r, u = array_ops.split(value=value, num_or_size_splits=2, axis=1)
-            with tf.variable_scope("candidate"):
-                c = self._activation(_linear([inputs, r * state], self._num_units, True))
-            new_h = u * state + (1 - u) * c
-        return new_h, new_h
-
-
 class Actor(object):
     '''The imitation GAN policy network.'''
 
     def __init__(self, opt):
         super(Actor, self).__init__()
         self.opt = opt
-        actor_cell = ActorCell(opt.actor_hidden_size)
+        actor_cell = tf.contrib.rnn.GRUCell(opt.actor_hidden_size)
+        projection_cell = tf.contrib.rnn.OutputProjectionWrapper(actor_cell, opt.vocab_size,
+                                                                 activation=tf.nn.log_softmax)
         # TODO tie weights with output linear
-        self.cell = tf.contrib.rnn.EmbeddingWrapper(actor_cell, opt.vocab_size, opt.emb_size)
+        self.cell = tf.contrib.rnn.EmbeddingWrapper(projection_cell, opt.vocab_size, opt.emb_size)
         self.eps_sample = False  # TODO do eps sampling
 
     def forward(self):
@@ -114,8 +88,7 @@ class Actor(object):
         inputs = tf.zeros([self.opt.batch_size], dtype=tf.int32)
         with tf.variable_scope('recurrence') as scope:
             for out_i in xrange(self.opt.seq_len):
-                hidden, _ = self.cell(inputs, hidden)
-                dist = tf.nn.log_softmax(_linear(hidden, opt.vocab_size))
+                dist, hidden = self.cell(inputs, hidden)
                 print(dist.get_shape())  # FIXME
                 all_logprobs.append(dist.unsqueeze(1))
                 prob = torch.exp(dist)
@@ -137,21 +110,18 @@ class Critic(object):
     def __init__(self, opt, gradient_penalize):
         super(Critic, self).__init__()
         self.opt = opt
-        self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
-        self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.critic_hidden_size,
-                          num_layers=opt.critic_layers, dropout=opt.critic_dropout,
-                          batch_first=True)
-        self.cost = nn.Linear(opt.critic_hidden_size, opt.vocab_size)
-        self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
-        self.zero_state = torch.zeros([opt.critic_layers, opt.batch_size,
-                                       opt.critic_hidden_size]).cuda()
-        self.gamma = opt.gamma
         self.gradient_penalize = gradient_penalize
+        self.gamma = opt.gamma
+        sqrt3 = math.sqrt(3)  # Uniform(-sqrt(3), sqrt(3)) has variance=1
+        initializer = tf.random_uniform_initializer(-sqrt3, sqrt3)
+        self.embedding = tf.get_variable("embedding", [opt.vocab_size, opt.emb_size],
+            initializer=initializer)
+        self.cell = tf.contrib.rnn.GRUCell(opt.critic_hidden_size)
         if gradient_penalize:
-            self.real = tf.placeholder()  # FIXME
-            self.fake = tf.placeholder()  # FIXME
+            self.real = tf.placeholder(tf.int32, [opt.batch_size, opt.seq_len], name='real_actions')
+            self.fake = tf.placeholder(tf.int32, [opt.batch_size, opt.seq_len], name='fake_actions')
         else:
-            self.actions = tf.placeholder()  # FIXME
+            self.actions = tf.placeholder(tf.int32, [opt.batch_size, opt.seq_len], name='actions')
 
     def forward(self):
         if self.gradient_penalize:
@@ -203,8 +173,8 @@ if __name__ == '__main__':
     parser.add_argument('--actor_hidden_size', type=int, default=512, help='Actor RNN hidden size')
     parser.add_argument('--critic_hidden_size', type=int, default=512,
                         help='Critic RNN hidden size')
-    parser.add_argument('--critic_layers', type=int, default=1)  # TODO add actor_layers
-    parser.add_argument('--critic_dropout', type=float, default=0.0)  # TODO add actor_dropout
+    parser.add_argument('--critic_layers', type=int, default=1)  # TODO + add actor_layers
+    parser.add_argument('--critic_dropout', type=float, default=0.0)  # TODO + add actor_dropout
     parser.add_argument('--eps', type=float, default=0.0,
                         help='epsilon for eps sampling. results in biased policy gradient')
     parser.add_argument('--eps_for_critic', type=int, default=0,
@@ -446,7 +416,7 @@ if __name__ == '__main__':
                     print(avgprobs, '\n')
                 print_generated = False
                 actor.eps_sample = opt.eps > 1e-8
-        critic.gamma = min(critic.gamma + opt.gamma_inc, 1.0)
+        critic.gamma = min(critic.gamma + opt.gamma_inc, 1.0)  # FIXME
 
         if cur_iter % opt.print_every == 0:
             print(cur_iter, ':\tWdist:', np.array(Wdists).mean(), '\terr R:',
