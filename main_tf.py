@@ -19,53 +19,6 @@ import tensorflow as tf
 import util
 
 
-def _linear(args, output_size, bias=True, bias_start=0.0, scope=None, initializer=None):
-    """Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
-    Args:
-        args: a 2D Tensor or a list of 2D, batch x n, Tensors.
-        output_size: int, second dimension of W[i].
-        bias: boolean, whether to add a bias term or not.
-        bias_start: starting value to initialize the bias; 0 by default.
-        scope: VariableScope for the created subgraph; defaults to "Linear".
-    Returns:
-        A 2D Tensor with shape [batch x output_size] equal to
-        sum_i(args[i] * W[i]), where W[i]s are newly created matrices.
-    Raises:
-        ValueError: if some of the arguments has unspecified or wrong shape.
-    Based on the code from TensorFlow."""
-    if not isinstance(args, collections.Sequence) or isinstance(args, six.string_types):
-        args = [args]
-
-    # Calculate the total size of arguments on dimension 1.
-    total_arg_size = 0
-    shapes = [a.get_shape().as_list() for a in args]
-    for shape in shapes:
-        if len(shape) != 2:
-            raise ValueError("Linear is expecting 2D arguments: %s" % str(shapes))
-        if not shape[1]:
-            raise ValueError("Linear expects shape[1] of arguments: %s" % str(shapes))
-        else:
-            total_arg_size += shape[1]
-
-    dtype = [a.dtype for a in args][0]
-
-    if initializer is None:
-        initializer = tf.contrib.layers.xavier_initializer()
-    # Now the computation.
-    with tf.variable_scope(scope or "Linear"):
-        matrix = tf.get_variable("Matrix", [total_arg_size, output_size], dtype=dtype,
-                                 initializer=initializer)
-        if len(args) == 1:
-            res = tf.matmul(args[0], matrix)
-        else:
-            res = tf.matmul(tf.concat(args, 1), matrix)
-        if not bias:
-            return res
-        bias_term = tf.get_variable("Bias", [output_size], dtype=dtype,
-                                    initializer=tf.constant_initializer(bias_start, dtype=dtype))
-    return res + bias_term
-
-
 class Actor(object):
     '''The imitation GAN policy network.'''
 
@@ -79,7 +32,6 @@ class Actor(object):
         self.cell = tf.contrib.rnn.EmbeddingWrapper(projection_cell, opt.vocab_size, opt.emb_size)
         self.eps_sample = False  # TODO do eps sampling
 
-    def forward(self):
         outputs = []
         all_logprobs = []
         all_probs = []
@@ -89,19 +41,17 @@ class Actor(object):
         with tf.variable_scope('recurrence') as scope:
             for out_i in xrange(self.opt.seq_len):
                 dist, hidden = self.cell(inputs, hidden)
-                print(dist.get_shape())  # FIXME
-                all_logprobs.append(dist.unsqueeze(1))
-                prob = torch.exp(dist)
-                all_probs.append(prob.unsqueeze(1))
-                prob_new = prob.detach()
-                probs.append(prob.data.mean(0).squeeze(0).cpu().numpy())  # for debugging
-                sampled = torch.multinomial(prob_new, 1)
-                outputs.append(sampled)
-                if out_i < self.opt.seq_len - 1:
-                    inputs = self.embedding(sampled.squeeze(1))
+                all_logprobs.append(tf.expand_dims(dist, 1))
+                prob = tf.exp(dist)
+                all_probs.append(tf.expand_dims(prob, 1))
+                probs.append(tf.reduce_mean(prob, 0, keep_dims=True))  # for debugging
+                inputs = tf.multinomial(dist, 1)
+                outputs.append(inputs)
                 scope.reuse_variables()
-        return (torch.cat(outputs, 1), torch.cat(all_logprobs, 1), torch.cat(all_probs, 1),
-                np.array(probs))
+        self.outputs = tf.concat(outputs, 1)
+        self.all_logprobs = tf.concat(all_logprobs, 1)
+        self.all_probs = tf.concat(all_probs, 1)
+        self.debug_probs = tf.concat(probs, 0)
 
 
 class Critic(object):
@@ -163,7 +113,7 @@ class Critic(object):
             return costs_abs, onehot_actions
 
 
-if __name__ == '__main__':
+def run(session):
     parser = argparse.ArgumentParser()
     parser.add_argument('--niter', type=int, default=1000000, help='number of iters to train for')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
@@ -281,6 +231,8 @@ if __name__ == '__main__':
     elif opt.optimizer == 'RMSprop':
         actor_optimizer = tf.train.AdamOptimizer(opt.learning_rate)
         critic_optimizer = tf.train.AdamOptimizer(opt.learning_rate)
+
+    session.run(tf.global_variables_initializer())
     solved = 0
     solved_fail = 0
 
@@ -295,8 +247,6 @@ if __name__ == '__main__':
         actor.eps_sample = bool(opt.eps_for_critic) and opt.eps > 1e-8
 
         # train critic
-        for param in critic.parameters():  # reset requires_grad
-            param.requires_grad = True  # they are set to False below in actor update
         if cur_iter < opt.burnin:
             critic_iters = opt.burnin_critic_iters
         else:
@@ -306,9 +256,7 @@ if __name__ == '__main__':
         err_f = []
         critic_gnorms = []
         for critic_i in xrange(critic_iters):
-            critic.zero_grad()
-
-            generated, _, _, _ = actor()
+            generated = session.run(actor.outputs)
             buffer.push(generated.data.cpu().numpy())
             generated = buffer.sample(opt.batch_size)
             generated = torch.from_numpy(generated).cuda()
@@ -469,3 +417,8 @@ if __name__ == '__main__':
             if reset:
                 solved = 0
                 solved_fail = 0
+
+
+if __name__ == '__main__':
+    with tf.Graph().as_default(), tf.Session() as session:
+        run(session)
