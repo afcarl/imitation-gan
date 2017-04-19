@@ -24,23 +24,22 @@ class Actor(object):
 
     def __init__(self, opt):
         super(Actor, self).__init__()
-        self.opt = opt
         actor_cell = tf.contrib.rnn.GRUCell(opt.actor_hidden_size)
         projection_cell = tf.contrib.rnn.OutputProjectionWrapper(actor_cell, opt.vocab_size,
                                                                  activation=tf.nn.log_softmax)
         # TODO tie weights with output linear
-        self.cell = tf.contrib.rnn.EmbeddingWrapper(projection_cell, opt.vocab_size, opt.emb_size)
+        cell = tf.contrib.rnn.EmbeddingWrapper(projection_cell, opt.vocab_size, opt.emb_size)
         self.eps_sample = False  # TODO do eps sampling
 
         outputs = []
         all_logprobs = []
         all_probs = []
         probs = []  # for debugging
-        hidden = self.cell.zero_state(self.opt.batch_size, tf.float32)
-        inputs = tf.zeros([self.opt.batch_size], dtype=tf.int32)
+        hidden = cell.zero_state(opt.batch_size, tf.float32)
+        inputs = tf.zeros([opt.batch_size], dtype=tf.int32)
         with tf.variable_scope('recurrence') as scope:
-            for out_i in xrange(self.opt.seq_len):
-                dist, hidden = self.cell(inputs, hidden)
+            for out_i in xrange(opt.seq_len):
+                dist, hidden = cell(inputs, hidden)
                 all_logprobs.append(tf.expand_dims(dist, 1))
                 prob = tf.exp(dist)
                 all_probs.append(tf.expand_dims(prob, 1))
@@ -59,58 +58,48 @@ class Critic(object):
 
     def __init__(self, opt, gradient_penalize):
         super(Critic, self).__init__()
-        self.opt = opt
         self.gradient_penalize = gradient_penalize
         self.gamma = opt.gamma
         sqrt3 = math.sqrt(3)  # Uniform(-sqrt(3), sqrt(3)) has variance=1
         initializer = tf.random_uniform_initializer(-sqrt3, sqrt3)
-        self.embedding = tf.get_variable("embedding", [opt.vocab_size, opt.emb_size],
-            initializer=initializer)
-        self.cell = tf.contrib.rnn.GRUCell(opt.critic_hidden_size)
+        embedding = tf.get_variable("embedding", [opt.vocab_size, opt.emb_size],
+                                    initializer=initializer)
+        cell = tf.contrib.rnn.GRUCell(opt.critic_hidden_size)
         if gradient_penalize:
             self.real = tf.placeholder(tf.int32, [opt.batch_size, opt.seq_len], name='real_actions')
             self.fake = tf.placeholder(tf.int32, [opt.batch_size, opt.seq_len], name='fake_actions')
         else:
             self.actions = tf.placeholder(tf.int32, [opt.batch_size, opt.seq_len], name='actions')
 
-    def forward(self):
+        zero_input = tf.zeros([opt.batch_size, 1], dtype=tf.int32)
         if self.gradient_penalize:
-            padded_real = torch.cat([self.zero_input, self.real], 1)
-            padded_fake = torch.cat([self.zero_input, self.fake], 1)
-            onehot_real = torch.zeros(padded_real.size() + (self.opt.vocab_size,)).cuda()
-            onehot_fake = torch.zeros(padded_fake.size() + (self.opt.vocab_size,)).cuda()
-            padded_real.unsqueeze_(2)
-            padded_fake.unsqueeze_(2)
-            onehot_real.scatter_(2, padded_real, 1)
-            onehot_fake.scatter_(2, padded_fake, 1)
-            alpha = torch.rand(real.size(0)).unsqueeze(1).unsqueeze(2).expand_as(onehot_real).cuda()
+            padded_real = tf.concat([zero_input, self.real], 1)
+            padded_fake = tf.concat([zero_input, self.fake], 1)
+            onehot_real = tf.one_hot(padded_real, opt.vocab_size, axis=-1, dtype=tf.float32)
+            onehot_fake = tf.one_hot(padded_fake, opt.vocab_size, axis=-1, dtype=tf.float32)
+            alpha = tf.random_uniform([opt.batch_size, 1, 1], 0.0, 1.0)
+            # TODO need gradients of loss w.r.t. this
             onehot_actions = (alpha * onehot_real) + ((1 - alpha) * onehot_fake)
-            onehot_actions = Variable(onehot_actions, requires_grad=True)
-            inputs = torch.mm(onehot_actions.view(-1, self.opt.vocab_size), self.embedding.weight)
-            inputs = inputs.view(onehot_actions.size(0), -1, self.opt.emb_size)
+            inputs = tf.matmul(tf.reshape(onehot_actions, [-1, opt.vocab_size]), embedding)
+            inputs = tf.reshape(inputs, [opt.batch_size, -1, opt.emb_size])
         else:
-            padded_actions = torch.cat([self.zero_input, self.actions], 1)
-            inputs = self.embedding(Variable(padded_actions))
-            onehot_actions = None
-        outputs, _ = self.rnn(inputs, Variable(self.zero_state))
-        outputs = outputs.contiguous()
-        flattened = outputs.view(-1, self.opt.critic_hidden_size)
-        flat_costs = self.cost(flattened)
-        costs = flat_costs.view(self.opt.batch_size, self.opt.seq_len + 1, self.opt.vocab_size)
+            padded_actions = tf.concat([zero_input, self.actions], 1)
+            inputs = tf.nn.embedding_lookup(embedding, padded_actions)
+        outputs, _ = tf.nn.dynamic_rnn(cell, inputs, dtype=tf.float32)
+        costs = tf.contrib.layers.fully_connected(inputs=outputs, num_outputs=opt.vocab_size,
+                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
+                                         biases_initializer=tf.zeros_initializer(), scope='costs')
         costs = costs[:, :-1]  # account for the padding
         if self.gamma < 1.0 - 1e-8:
-            discount = torch.cuda.FloatTensor([self.gamma ** i for i in xrange(self.opt.seq_len)])
-            discount = discount.unsqueeze(0).expand(self.opt.batch_size, self.opt.seq_len)
-            discount = Variable(discount)
-            costs = costs * discount
-        costs_abs = torch.abs(costs)
-        if self.opt.smooth_zero > 1e-4:
-            select = (costs_abs >= self.opt.smooth_zero).float()
-            costs_abs = costs_abs - (self.opt.smooth_zero / 2)
-            costs_sq = (costs ** 2) / (self.opt.smooth_zero * 2)
-            return (select * costs_abs) + ((1.0 - select) * costs_sq), onehot_actions
-        else:
-            return costs_abs, onehot_actions
+            discount = tf.constant([self.gamma ** i for i in xrange(opt.seq_len)],
+                                   dtype=tf.float32)
+            costs *= tf.expand_dims(discount, -1)
+        costs_abs = tf.abs(costs)
+        if opt.smooth_zero > 1e-4:
+            costs_abs = tf.where(costs_abs >= opt.smooth_zero,
+                                 costs_abs - (opt.smooth_zero / 2),
+                                 (costs ** 2) / (opt.smooth_zero * 2))
+        self.costs = costs_abs
 
 
 def run(session):
@@ -257,9 +246,8 @@ def run(session):
         critic_gnorms = []
         for critic_i in xrange(critic_iters):
             generated = session.run(actor.outputs)
-            buffer.push(generated.data.cpu().numpy())
+            buffer.push(generated)
             generated = buffer.sample(opt.batch_size)
-            generated = torch.from_numpy(generated).cuda()
             costs, _ = critic(generated)
             entropy = -((1e-6 + costs) * torch.log(1e-6 + costs)).sum() / opt.batch_size
             costs = costs.gather(2, Variable(generated.unsqueeze(2))).squeeze(2)
@@ -420,5 +408,7 @@ def run(session):
 
 
 if __name__ == '__main__':
-    with tf.Graph().as_default(), tf.Session() as session:
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    with tf.Graph().as_default(), tf.Session(config=config) as session:
         run(session)
