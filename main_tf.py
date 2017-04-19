@@ -100,6 +100,14 @@ class Critic(object):
                                  costs_abs - (opt.smooth_zero / 2),
                                  (costs ** 2) / (opt.smooth_zero * 2))
         self.costs = costs_abs
+        self.entropy = -tf.reduce_sum((1e-6 + self.costs) * tf.log(1e-6 + self.costs)) / \
+                       opt.batch_size
+        batch_range = tf.tile(tf.reshape(tf.range(opt.batch_size), [-1, 1, 1]), [1, opt.seq_len, 1])
+        seq_range = tf.tile(tf.reshape(tf.range(opt.seq_len), [1, -1, 1]), [opt.batch_size, 1, 1])
+        indices = tf.expand_dims(self.actions, -1)
+        gather_indices = tf.concat([batch_range, seq_range, indices], 2)
+        if not self.gradient_penalize:
+            self.sliced_costs = tf.gather_nd(self.costs, gather_indices)
 
 
 def run(session):
@@ -263,13 +271,14 @@ def run(session):
             loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy)
             loss.backward()
 
-            costs, inputs = gp_critic((real, generated))
-            loss = costs.sum() / opt.batch_size
-            loss.backward(Variable(torch.ones(1).cuda(), requires_grad=True),
-                          retain_variables=True)
-            # TODO consider each pair individually instead of the sum. this one is incorrect.
-            loss = opt.gradient_penalty * (torch.norm(inputs.grad) - 1) ** 2
-            loss.backward()  # FIXME this doesn't work on pytorch yet
+#            # XXX what is costs.sum()? can't slice according to actions!
+#            costs, inputs = gp_critic((real, generated))
+#            loss = costs.sum() / opt.batch_size
+#            loss.backward(Variable(torch.ones(1).cuda(), requires_grad=True),
+#                          retain_variables=True)
+#            # TODO consider each pair individually instead of the sum. this one is incorrect.
+#            loss = opt.gradient_penalty * (torch.norm(inputs.grad) - 1) ** 2
+#            loss.backward()
 
             critic_gnorms.append(util.gradient_norm(critic.parameters()))
             nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
