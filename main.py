@@ -174,8 +174,6 @@ if __name__ == '__main__':
     parser.add_argument('--gradient_penalty', type=float, default=10)
     parser.add_argument('--max_grad_norm', type=float, default=5.0,
                         help='norm for gradient clipping')
-    parser.add_argument('--clamp_limit', type=float, default=-1,  # TODO remove with WGAN-GP
-                        help='critic param clamping. -1 to disable')
     parser.add_argument('--critic_iters', type=int, default=5,  # 20 or 25 for larger tasks
                         help='number of critic iters per turn')
     parser.add_argument('--actor_iters', type=int, default=1,  # 15 or 20 for larger tasks
@@ -211,7 +209,7 @@ if __name__ == '__main__':
     opt.replay_size = opt.replay_actors * opt.batch_size * opt.critic_iters
     opt.replay_size_half = opt.replay_actors_half * opt.batch_size * opt.critic_iters
 
-    cudnn.benchmark = True
+    cudnn.enabled = False
     np.set_printoptions(precision=4, threshold=10000, linewidth=200, suppress=True)
 
     if opt.task == 'words':
@@ -268,9 +266,6 @@ if __name__ == '__main__':
         err_f = []
         critic_gnorms = []
         for critic_i in xrange(critic_iters):
-            if opt.clamp_limit > 0:  # TODO remove with WGAN-GP
-                for param in critic.parameters():
-                    param.data.clamp_(-opt.clamp_limit, opt.clamp_limit)
             critic.zero_grad()
 
             generated, _, _, _ = actor()
@@ -292,16 +287,15 @@ if __name__ == '__main__':
             loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy)
             loss.backward()
 
-#           TODO enable with WGAN-GP:
-#            critic.gradient_penalize = True
-#            costs, inputs = critic((real, generated))
-#            loss = costs.sum() / opt.batch_size
-#            loss.backward(Variable(torch.ones(1).cuda(), requires_grad=True),
-#                          retain_variables=True)
-#            # TODO consider each pair individually instead of the sum. this one is incorrect.
-#            loss = opt.gradient_penalty * (torch.norm(inputs.grad) - 1) ** 2
-#            loss.backward()  # FIXME this doesn't work on pytorch yet
-#            critic.gradient_penalize = False
+            critic.gradient_penalize = True
+            costs, inputs = critic((real, generated))
+            loss = costs.sum() / opt.batch_size  # FIXME these are unsliced costs!
+            loss.backward(Variable(torch.ones(1).cuda(), requires_grad=True),
+                          retain_variables=True)  # FIXME need this backward??
+            # TODO consider each pair individually instead of the sum. this one is incorrect.
+            loss = opt.gradient_penalty * (torch.norm(inputs.grad) - 1) ** 2
+            loss.backward()  # FIXME this doesn't work on pytorch yet
+            critic.gradient_penalize = False
 
             critic_gnorms.append(util.gradient_norm(critic.parameters()))
             nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
