@@ -102,12 +102,15 @@ class Critic(object):
         self.costs = costs_abs
         self.entropy = -tf.reduce_sum((1e-6 + self.costs) * tf.log(1e-6 + self.costs)) / \
                        opt.batch_size
-        batch_range = tf.tile(tf.reshape(tf.range(opt.batch_size), [-1, 1, 1]), [1, opt.seq_len, 1])
-        seq_range = tf.tile(tf.reshape(tf.range(opt.seq_len), [1, -1, 1]), [opt.batch_size, 1, 1])
-        indices = tf.expand_dims(self.actions, -1)
-        gather_indices = tf.concat([batch_range, seq_range, indices], 2)
         if not self.gradient_penalize:
+            batch_range = tf.tile(tf.reshape(tf.range(opt.batch_size), [-1, 1, 1]),
+                                  [1, opt.seq_len, 1])
+            seq_range = tf.tile(tf.reshape(tf.range(opt.seq_len), [1, -1, 1]),
+                                [opt.batch_size, 1, 1])
+            indices = tf.expand_dims(self.actions, -1)
+            gather_indices = tf.concat([batch_range, seq_range, indices], 2)
             self.sliced_costs = tf.gather_nd(self.costs, gather_indices)
+            self.expected_cost = tf.reduce_sum(self.sliced_costs) / opt.batch_size
 
 
 def run(session):
