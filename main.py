@@ -295,7 +295,9 @@ if __name__ == '__main__':
                                                   [Variable(torch.ones(opt.batch_size).cuda(),
                                                             requires_grad=True)], [inputs],
                                                   only_inputs=False)
-            inputs_grad = inputs_grad[:, :-1]
+            # FIXME following causes loss.backward() to leak, but not needed since
+            #       inputs_grad[:, -1] is zero anyway.
+            #inputs_grad = inputs_grad[:, :-1]
             norm_errors = torch.sqrt((inputs_grad ** 2).sum(1).sum(2)) - 1
             loss = opt.gradient_penalty * (norm_errors ** 2).sum() / opt.batch_size
             loss.backward()
