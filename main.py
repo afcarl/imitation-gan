@@ -14,6 +14,7 @@ import matplotlib.cm as cm
 
 import numpy as np
 import torch
+from torch import autograd
 from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
@@ -290,11 +291,11 @@ if __name__ == '__main__':
             critic.gradient_penalize = True
             costs, inputs = critic((real, generated))
             loss = costs.sum() / opt.batch_size  # FIXME these are unsliced costs!
-            loss.backward(Variable(torch.ones(1).cuda(), requires_grad=True),
-                          retain_variables=True)  # FIXME need this backward??
             # TODO consider each pair individually instead of the sum. this one is incorrect.
-            loss = opt.gradient_penalty * (torch.norm(inputs.grad) - 1) ** 2
-            loss.backward()  # FIXME this doesn't work on pytorch yet
+            inputs_grad, = autograd.differentiate([loss], [Variable(torch.ones(1).cuda(),
+                                                                    requires_grad=True)], [inputs])
+            loss = opt.gradient_penalty * (torch.norm(inputs_grad) - 1) ** 2
+            loss.backward()
             critic.gradient_penalize = False
 
             critic_gnorms.append(util.gradient_norm(critic.parameters()))
