@@ -290,7 +290,8 @@ if __name__ == '__main__':
 
             critic.gradient_penalize = True
             costs, inputs = critic((real, generated))
-            loss = costs.sum() / opt.batch_size  # FIXME these are unsliced costs!
+            # XXX these are unsliced costs
+            loss = costs.sum() / (opt.batch_size * opt.vocab_size)
             # TODO consider each pair individually instead of the sum. this one is incorrect.
             inputs_grad, = autograd.differentiate([loss], [Variable(torch.ones(1).cuda(),
                                                                     requires_grad=True)], [inputs])
