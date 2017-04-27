@@ -160,8 +160,11 @@ if __name__ == '__main__':
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--gamma_inc', type=float, default=0.0,
                         help='the amount by which to increase gamma at each turn')
-    parser.add_argument('--entropy_reg', type=float, default=1e-3,  # crucial. >1e-3 for toys.
-                        help='policy entropy regularization')  # TODO entropy decay
+    # 1e-3 without decay for text, >1e-3 for toys:
+    parser.add_argument('--entropy_reg', type=float, default=1.0,  # crucial.
+                        help='policy entropy regularization')
+    parser.add_argument('--entropy_decay', type=float, default=0.996,
+                        help='policy entropy regularization weight decay per turn')
     parser.add_argument('--critic_entropy_reg', type=float, default=0.0,  # <= 1e-3
                         help='critic entropy regularization')
     parser.add_argument('--smooth_zero', type=float, default=2e-2,
@@ -352,6 +355,7 @@ if __name__ == '__main__':
         else:
             print_generated = False
             actor.eps_sample = opt.eps > 1e-8
+        entropy_reg = opt.entropy_reg * (opt.entropy_decay ** cur_iter)
 
         actor_gnorms = []
         for actor_i in xrange(actor_iters):
@@ -388,7 +392,7 @@ if __name__ == '__main__':
                 disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
                 loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
             entropy = -(all_probs * all_logprobs).sum() / (opt.batch_size - int(print_generated))
-            loss -= opt.entropy_reg * entropy
+            loss -= entropy_reg * entropy
             loss.backward()
             actor_gnorms.append(util.gradient_norm(actor.parameters()))
             nn.utils.clip_grad_norm(actor.parameters(), opt.max_grad_norm)
