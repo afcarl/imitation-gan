@@ -295,7 +295,7 @@ if __name__ == '__main__':
                 costs, inputs = critic((real, generated))
                 costs = costs * inputs[:, 1:]
                 loss = ((opt.real_multiplier + 1) / 2) * costs.sum()
-                inputs_grad, = autograd.differentiate(loss, inputs, create_graph=True)
+                inputs_grad, = autograd.differentiate([loss], [inputs], create_graph=True)
                 inputs_grad = inputs_grad.view(opt.batch_size, -1)
                 norm_errors = torch.sqrt((inputs_grad ** 2).sum(1)) - 1
                 loss = opt.gradient_penalty * (norm_errors ** 2).sum() / opt.batch_size
