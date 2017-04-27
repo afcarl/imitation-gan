@@ -132,6 +132,15 @@ class Critic(nn.Module):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--load_actor', type=str, default='', help='actor load file')
+    parser.add_argument('--load_critic', type=str, default='', help='critic load file')
+    parser.add_argument('--save_actor', type=str, default='',
+                        help='actor save file. saves as actor.model in logs by default')
+    parser.add_argument('--save_critic', type=str, default='',
+                        help='critic save file. saves as critic.model in logs by default')
+    parser.add_argument('--save_every', type=int, default=500,
+                        help='save every these many iters. -1 to disable')
+    parser.add_argument('--save_overwrite', type=int, default=1, help='overwrite same save files')
     parser.add_argument('--niter', type=int, default=1000000, help='number of iters to train for')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
     parser.add_argument('--seq_len', type=int, default=20, help='toy sequence length')
@@ -201,6 +210,10 @@ if __name__ == '__main__':
     opt.save = 'logs/' + opt.name
     if not os.path.exists(opt.save):
         os.makedirs(opt.save)
+    if not opt.save_actor:
+        opt.save_actor = opt.save + '/actor.model'
+    if not opt.save_critic:
+        opt.save_critic = opt.save + '/critic.model'
     train_log = open(opt.save + '/train.log', 'w')
     colors = cm.rainbow(np.linspace(0, 1, 3))
     plot_r = []
@@ -233,25 +246,40 @@ if __name__ == '__main__':
     actor.cuda()
     critic.cuda()
 
-    assert opt.replay_size >= opt.batch_size
-    if opt.exp_replay_buffer:
-        buffer = util.ExponentialReplayMemory(opt.replay_size, opt.replay_size_half)
-    else:
-        buffer = util.ReplayMemory(opt.replay_size)
-
     kwargs = {'lr': opt.learning_rate}
     if opt.optimizer == 'Adam':
         kwargs['betas'] = (opt.beta1, opt.beta2)
     actor_optimizer = getattr(optim, opt.optimizer)(actor.parameters(), **kwargs)
     critic_optimizer = getattr(optim, opt.optimizer)(critic.parameters(), **kwargs)
+
+    if opt.load_actor:
+        state_dict, optimizer_dict, actor_cur_iter = torch.load(opt.load_actor)
+        actor.load_state_dict(state_dict)
+        actor_optimizer.load_state_dict(optimizer_dict)
+        print('Loaded actor from', opt.load_actor)
+    else:
+        actor_cur_iter = -1
+    if opt.load_critic:
+        state_dict, optimizer_dict, critic_cur_iter, buffer = torch.load(opt.load_critic)
+        critic.load_state_dict(state_dict)
+        critic_optimizer.load_state_dict(optimizer_dict)
+        print('Loaded critic from', opt.load_critic)
+    else:
+        critic_cur_iter = -1
+        assert opt.replay_size >= opt.batch_size
+        if opt.exp_replay_buffer:
+            buffer = util.ExponentialReplayMemory(opt.replay_size, opt.replay_size_half)
+        else:
+            buffer = util.ReplayMemory(opt.replay_size)
+    start_iter = min(actor_cur_iter, critic_cur_iter) + 1
+
     solved = 0
     solved_fail = 0
-
     print('\nReal examples:')
     task.display(task.get_data(opt.batch_size))
     print()
     plot_x = []
-    for cur_iter in xrange(opt.niter):
+    for cur_iter in xrange(start_iter, start_iter + opt.niter):
         if solved >= opt.solved_threshold:
             print('%d: Task solved, exiting.' % cur_iter)
             break
@@ -436,3 +464,18 @@ if __name__ == '__main__':
             if reset:
                 solved = 0
                 solved_fail = 0
+        if opt.save_every > 0 and cur_iter and cur_iter % opt.save_every == 0:
+            print('Saving model...')
+            save_actor = opt.save_actor
+            save_critic = opt.save_critic
+            if not opt.save_overwrite:
+                save_actor += ('.%d' % cur_iter)
+                save_critic += ('.%d' % cur_iter)
+            with open(save_actor, 'wb') as f:
+                states = [actor.state_dict(), actor_optimizer.state_dict(), cur_iter]
+                torch.save(states, f)
+                print('Saved actor to', save_actor)
+            with open(save_critic, 'wb') as f:
+                states = [critic.state_dict(), critic_optimizer.state_dict(), cur_iter, buffer]
+                torch.save(states, f)
+                print('Saved critic to', save_critic)
