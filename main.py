@@ -149,8 +149,8 @@ if __name__ == '__main__':
     parser.add_argument('--actor_hidden_size', type=int, default=512, help='Actor RNN hidden size')
     parser.add_argument('--critic_hidden_size', type=int, default=512,
                         help='Critic RNN hidden size')
-    parser.add_argument('--critic_layers', type=int, default=1)  # TODO add actor_layers
-    parser.add_argument('--critic_dropout', type=float, default=0.0)  # TODO add actor_dropout
+    parser.add_argument('--critic_layers', type=int, default=1)
+    parser.add_argument('--critic_dropout', type=float, default=0.0)
     parser.add_argument('--eps', type=float, default=0.0,
                         help='epsilon for eps sampling. results in biased policy gradient')
     parser.add_argument('--eps_for_critic', type=int, default=0,
@@ -163,7 +163,7 @@ if __name__ == '__main__':
     # 1e-3 without decay for text, >1e-3 for toys:
     parser.add_argument('--entropy_reg', type=float, default=1.0,  # crucial.
                         help='policy entropy regularization')
-    parser.add_argument('--entropy_decay', type=float, default=0.996,
+    parser.add_argument('--entropy_decay', type=float, default=0.995,
                         help='policy entropy regularization weight decay per turn')
     parser.add_argument('--critic_entropy_reg', type=float, default=0.0,  # <= 1e-3
                         help='critic entropy regularization')
