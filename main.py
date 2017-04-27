@@ -163,8 +163,10 @@ if __name__ == '__main__':
     # 1e-3 without decay for text, >1e-3 for toys:
     parser.add_argument('--entropy_reg', type=float, default=1.0,  # crucial.
                         help='policy entropy regularization')
-    parser.add_argument('--entropy_decay', type=float, default=0.995,
+    parser.add_argument('--entropy_decay', type=float, default=0.994,
                         help='policy entropy regularization weight decay per turn')
+    parser.add_argument('--entropy_reg_min', type=float, default=5e-5,
+                        help='minimum policy entropy regularization')
     parser.add_argument('--critic_entropy_reg', type=float, default=0.0,  # <= 1e-3
                         help='critic entropy regularization')
     parser.add_argument('--smooth_zero', type=float, default=2e-2,
@@ -355,7 +357,7 @@ if __name__ == '__main__':
         else:
             print_generated = False
             actor.eps_sample = opt.eps > 1e-8
-        entropy_reg = opt.entropy_reg * (opt.entropy_decay ** cur_iter)
+        entropy_reg = max(opt.entropy_reg * (opt.entropy_decay ** cur_iter), opt.entropy_reg_min)
 
         actor_gnorms = []
         for actor_i in xrange(actor_iters):
