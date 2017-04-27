@@ -290,22 +290,20 @@ if __name__ == '__main__':
             loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy)
             loss.backward()
 
-            critic.gradient_penalize = True
-            costs, inputs = critic((real, generated))
-            loss = costs.sum(1).sum(2).squeeze(1).squeeze(1) / (opt.vocab_size * opt.batch_size)
-            # FIXME something is wrong here. fake cost can go up indefinitely, which shouldn't be
-            #       possible if this is right.
-            inputs_grad, = autograd.differentiate([loss],
-                                                  [Variable(torch.ones(opt.batch_size).cuda(),
-                                                            requires_grad=True)], [inputs],
-                                                  only_inputs=False)
-            # FIXME following causes loss.backward() to leak, but not needed since
-            #       inputs_grad[:, -1] is zero anyway.
-            #inputs_grad = inputs_grad[:, :-1]
-            norm_errors = torch.sqrt((inputs_grad ** 2).sum(1).sum(2)) - 1
-            loss = opt.gradient_penalty * (norm_errors ** 2).sum() / opt.batch_size
-            loss.backward()
-            critic.gradient_penalize = False
+            if opt.gradient_penalty > 0:
+                critic.gradient_penalize = True
+                costs, inputs = critic((real, generated))
+                costs = costs * inputs[:, 1:]
+                loss = ((opt.real_multiplier + 1) / 2) * costs.sum()
+                inputs_grad, = autograd.differentiate([loss],
+                                                      [Variable(torch.ones(1).cuda(),
+                                                                requires_grad=True)], [inputs],
+                                                      only_inputs=True)
+                inputs_grad = inputs_grad.view(opt.batch_size, -1)
+                norm_errors = torch.sqrt((inputs_grad ** 2).sum(1)) - 1
+                loss = opt.gradient_penalty * (norm_errors ** 2).sum() / opt.batch_size
+                loss.backward()
+                critic.gradient_penalize = False
 
             critic_gnorms.append(util.gradient_norm(critic.parameters()))
             nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
