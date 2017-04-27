@@ -424,7 +424,7 @@ if __name__ == '__main__':
             train_log.write('%.4f\t%.4f\t%.4f\n' % (np.array(Wdists).mean(), np.array(err_r).mean(),
                             np.array(err_f).mean()))
             train_log.flush()
-        if cur_iter % opt.plot_every == 0:
+        if cur_iter and cur_iter % opt.plot_every == 0:
             plot_x.append(cur_iter)
             plot_r.append(np.array(err_r).mean())
             plot_f.append(np.array(err_f).mean())
