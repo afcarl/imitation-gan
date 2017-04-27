@@ -143,7 +143,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_overwrite', type=int, default=1, help='overwrite same save files')
     parser.add_argument('--niter', type=int, default=1000000, help='number of iters to train for')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
-    parser.add_argument('--seq_len', type=int, default=20, help='toy sequence length')
+    parser.add_argument('--seq_len', type=int, default=50, help='sequence length')
     parser.add_argument('--vocab_size', type=int, default=60, help='vocab size for data')
     parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
     parser.add_argument('--actor_hidden_size', type=int, default=512, help='Actor RNN hidden size')
@@ -160,11 +160,11 @@ if __name__ == '__main__':
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--gamma_inc', type=float, default=0.0,
                         help='the amount by which to increase gamma at each turn')
-    parser.add_argument('--entropy_reg', type=float, default=1e-2,  # crucial
-                        help='policy entropy regularization')
+    parser.add_argument('--entropy_reg', type=float, default=1e-3,  # crucial. >1e-3 for toys.
+                        help='policy entropy regularization')  # TODO entropy decay
     parser.add_argument('--critic_entropy_reg', type=float, default=0.0,  # <= 1e-3
                         help='critic entropy regularization')
-    parser.add_argument('--smooth_zero', type=float, default=1.0,
+    parser.add_argument('--smooth_zero', type=float, default=2e-2,
                         help='s, use c^2/2s instead of c-(s/2) when abs critic score c<s')
     parser.add_argument('--use_advantage', type=int, default=1)
     parser.add_argument('--exp_replay_buffer', type=int, default=0,
@@ -186,9 +186,9 @@ if __name__ == '__main__':
     parser.add_argument('--gradient_penalty', type=float, default=10)
     parser.add_argument('--max_grad_norm', type=float, default=5.0,
                         help='norm for gradient clipping')
-    parser.add_argument('--critic_iters', type=int, default=15,  # 20 or 25 for larger tasks
+    parser.add_argument('--critic_iters', type=int, default=20,  # 20 or 25 for larger tasks
                         help='number of critic iters per turn')  # crucial
-    parser.add_argument('--actor_iters', type=int, default=10,  # 15 or 20 for larger tasks
+    parser.add_argument('--actor_iters', type=int, default=15,  # 15 or 20 for larger tasks
                         help='number of actor iters per turn')  # crucial
     parser.add_argument('--burnin', type=int, default=25, help='number of burnin iterations')
     parser.add_argument('--burnin_actor_iters', type=int, default=1)
