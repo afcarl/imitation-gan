@@ -32,9 +32,10 @@ class Actor(nn.Module):
         self.opt = opt
         self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
         self.cell = nn.GRUCell(opt.emb_size, opt.actor_hidden_size)
-        self.dist1 = nn.Linear(opt.actor_hidden_size, opt.emb_size)
-        self.dist2 = nn.Linear(opt.emb_size, opt.vocab_size)
-        self.embedding.weight = self.dist2.weight  # tie weights
+        self.dist = nn.Linear(opt.actor_hidden_size, opt.vocab_size)
+        #self.dist1 = nn.Linear(opt.actor_hidden_size, opt.emb_size)
+        #self.dist2 = nn.Linear(opt.emb_size, opt.vocab_size)
+        #self.embedding.weight = self.dist2.weight  # tie weights
         self.zero_input = torch.LongTensor(opt.batch_size).zero_().cuda()
         self.zero_state = torch.zeros([opt.batch_size, opt.actor_hidden_size]).cuda()
         self.eps_sample = False  # do eps sampling
@@ -48,7 +49,8 @@ class Actor(nn.Module):
         inputs = self.embedding(Variable(self.zero_input))
         for out_i in xrange(self.opt.seq_len):
             hidden = self.cell(inputs, hidden)
-            dist = F.log_softmax(self.dist2(self.dist1(hidden)))
+            #dist = F.log_softmax(self.dist2(self.dist1(hidden)))
+            dist = F.log_softmax(self.dist(hidden))
             all_logprobs.append(dist.unsqueeze(1))
             prob = torch.exp(dist)
             all_probs.append(prob.unsqueeze(1))
@@ -291,6 +293,8 @@ if __name__ == '__main__':
             critic.gradient_penalize = True
             costs, inputs = critic((real, generated))
             loss = costs.sum(1).sum(2).squeeze(1).squeeze(1) / (opt.vocab_size * opt.batch_size)
+            # FIXME something is wrong here. fake cost can go up indefinitely, which shouldn't be
+            #       possible if this is right.
             inputs_grad, = autograd.differentiate([loss],
                                                   [Variable(torch.ones(opt.batch_size).cuda(),
                                                             requires_grad=True)], [inputs],
