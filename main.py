@@ -117,7 +117,9 @@ class Critic(nn.Module):
         costs = costs[:, :-1]  # account for the padding
         if self.gamma < 1.0 - 1e-8:
             discount = torch.cuda.FloatTensor([self.gamma ** i for i in xrange(self.opt.seq_len)])
-            discount = discount.unsqueeze(0).expand(self.opt.batch_size, self.opt.seq_len)
+            discount = discount.unsqueeze(0).unsqueeze(2).expand(self.opt.batch_size,
+                                                                 self.opt.seq_len,
+                                                                 self.opt.vocab_size)
             discount = Variable(discount)
             costs = costs * discount
         costs_abs = torch.abs(costs)
@@ -161,20 +163,20 @@ if __name__ == '__main__':
     parser.add_argument('--gamma_inc', type=float, default=0.0,
                         help='the amount by which to increase gamma at each turn')
     # 1e-3 without decay for text, >1e-3 for toys:
-    parser.add_argument('--entropy_reg', type=float, default=1.0,  # crucial.
+    parser.add_argument('--entropy_reg', type=float, default=5e-2,  # crucial.
                         help='policy entropy regularization')
-    parser.add_argument('--entropy_decay', type=float, default=0.994,
+    parser.add_argument('--entropy_decay', type=float, default=0.995,
                         help='policy entropy regularization weight decay per turn')
-    parser.add_argument('--entropy_reg_min', type=float, default=5e-5,
+    parser.add_argument('--entropy_reg_min', type=float, default=5e-4,
                         help='minimum policy entropy regularization')
     parser.add_argument('--critic_entropy_reg', type=float, default=0.0,  # <= 1e-3
                         help='critic entropy regularization')
-    parser.add_argument('--smooth_zero', type=float, default=2e-2,
+    parser.add_argument('--smooth_zero', type=float, default=1e-2,
                         help='s, use c^2/2s instead of c-(s/2) when abs critic score c<s')
     parser.add_argument('--use_advantage', type=int, default=1)
     parser.add_argument('--exp_replay_buffer', type=int, default=0,
                         help='use a replay buffer with an exponential distribution')
-    parser.add_argument('--real_multiplier', type=float, default=5.0,  # crucial
+    parser.add_argument('--real_multiplier', type=float, default=10.0,  # crucial
                         help='weight for real samples as compared to fake for critic learning')
     parser.add_argument('--replay_actors', type=int, default=10,  # higher with exp buffer
                         help='number of actors for experience replay')
@@ -328,7 +330,7 @@ if __name__ == '__main__':
                 costs, inputs = critic((real, generated))
                 costs = costs * inputs[:, 1:]
                 loss = ((opt.real_multiplier + 1) / 2) * costs.sum()
-                inputs_grad, = autograd.differentiate([loss], [inputs], create_graph=True)
+                inputs_grad, = autograd.grad([loss], [inputs], create_graph=True)
                 inputs_grad = inputs_grad.view(opt.batch_size, -1)
                 norm_errors = torch.sqrt((inputs_grad ** 2).sum(1)) - 1
                 loss = opt.gradient_penalty * (norm_errors ** 2).sum() / opt.batch_size
@@ -422,7 +424,8 @@ if __name__ == '__main__':
         if cur_iter % opt.print_every == 0:
             print(cur_iter, ':\tWdist:', np.array(Wdists).mean(), '\terr R:',
                   np.array(err_r).mean(), '\terr F:', np.array(err_f).mean(), '\tgamma:',
-                  critic.gamma, '\tsolved:', solved, '\tsolved_fail:', solved_fail)
+                  critic.gamma, '\tentropy_reg:', entropy_reg, '\tsolved:', solved,
+                  '\tsolved_fail:', solved_fail)
             train_log.write('%.4f\t%.4f\t%.4f\n' % (np.array(Wdists).mean(), np.array(err_r).mean(),
                             np.array(err_f).mean()))
             train_log.flush()
