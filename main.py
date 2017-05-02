@@ -204,6 +204,8 @@ if __name__ == '__main__':
     parser.add_argument('--task', type=str, default='lm', help='one of lm/longterm/words')
     parser.add_argument('--lm_data_dir', type=str, default='data/penn')
     parser.add_argument('--lm_char', type=int, default=1, help='1 for character level model')
+    parser.add_argument('--lm_word_vocab', type=int, default=100,
+                        help='word vocab size for char LM')
     parser.add_argument('--print_every', type=int, default=25,
                         help='print losses every these many steps')
     parser.add_argument('--plot_every', type=int, default=1,
@@ -240,7 +242,8 @@ if __name__ == '__main__':
     elif opt.task == 'longterm':
         task = util.LongtermTask(opt.seq_len, opt.vocab_size)
     elif opt.task == 'lm':
-        task = util.LMTask(opt.seq_len, opt.vocab_size, opt.lm_data_dir, opt.lm_char)
+        task = util.LMTask(opt.seq_len, opt.vocab_size, opt.lm_data_dir, opt.lm_char,
+                           opt.lm_word_vocab)
         if task.vocab_size != opt.vocab_size:
             opt.vocab_size = task.vocab_size
             print('Updated vocab_size:', opt.vocab_size)
@@ -311,7 +314,8 @@ if __name__ == '__main__':
             generated = buffer.sample(opt.batch_size)
             generated = torch.from_numpy(generated).cuda()
             costs, _ = critic(generated)
-            entropy = -((1e-6 + costs) * torch.log(1e-6 + costs)).sum() / opt.batch_size
+            norm_costs = costs / costs.sum(2).expand_as(costs)
+            entropy = -((1e-6 + norm_costs) * torch.log(1e-6 + norm_costs)).sum() / opt.batch_size
             costs = costs.gather(2, Variable(generated.unsqueeze(2))).squeeze(2)
             E_generated = costs.sum() / opt.batch_size
             loss = -E_generated - (opt.critic_entropy_reg * entropy)
@@ -319,7 +323,8 @@ if __name__ == '__main__':
 
             real = torch.from_numpy(task.get_data(opt.batch_size)).cuda()
             costs, _ = critic(real)
-            entropy = -((1e-6 + costs) * torch.log(1e-6 + costs)).sum() / opt.batch_size
+            norm_costs = costs / costs.sum(2).expand_as(costs)
+            entropy = -((1e-6 + norm_costs) * torch.log(1e-6 + norm_costs)).sum() / opt.batch_size
             costs = costs.gather(2, Variable(real.unsqueeze(2))).squeeze(2)
             E_real = costs.sum() / opt.batch_size
             loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy)

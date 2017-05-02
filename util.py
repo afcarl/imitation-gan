@@ -112,7 +112,8 @@ class Task(object):
 
 
 class LMTask(Task):
-    def __init__(self, seq_len, vocab_size, data_dir, char_model):
+    def __init__(self, seq_len, vocab_size, data_dir, char_model, word_vocab):
+        # TODO use word_vocab for words in char model
         super(LMTask, self).__init__(seq_len, vocab_size)
         self.char_model = char_model
         self.word_counts = collections.Counter()
