@@ -204,7 +204,7 @@ if __name__ == '__main__':
     parser.add_argument('--task', type=str, default='lm', help='one of lm/longterm/words')
     parser.add_argument('--lm_data_dir', type=str, default='data/penn')
     parser.add_argument('--lm_char', type=int, default=1, help='1 for character level model')
-    parser.add_argument('--lm_word_vocab', type=int, default=100,
+    parser.add_argument('--lm_word_vocab', type=int, default=15000,
                         help='word vocab size for char LM')
     parser.add_argument('--print_every', type=int, default=25,
                         help='print losses every these many steps')

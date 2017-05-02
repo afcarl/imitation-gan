@@ -113,24 +113,38 @@ class Task(object):
 
 class LMTask(Task):
     def __init__(self, seq_len, vocab_size, data_dir, char_model, word_vocab):
-        # TODO use word_vocab for words in char model
         super(LMTask, self).__init__(seq_len, vocab_size)
-        self.char_model = char_model
-        self.word_counts = collections.Counter()
-        self.add_word('<s>', special=True)  # zero_input is padded to the front in the model
-        self.add_word('<p>', special=True)  # to pad after eos
-        self.add_word('<e>', special=True)  # eos
-        self.add_word('<u>', special=True)  # unknown word token
-        for s in ['train', 'valid', 'test']:
-            self.prepare_vocab(os.path.join(data_dir, s + '.txt'))
-        self.idx2word = [w for w, _ in self.word_counts.most_common(self.vocab_size)]
-        self.word2idx = {w: i for i, w in enumerate(self.idx2word)}
+        self.data_dir = data_dir
+        if char_model:
+            self.char_model = False
+            self.vocab_size = word_vocab
+            self.make_vocab()
+            self.word_set = set(self.idx2word)
+            self.char_model = True
+            self.vocab_size = vocab_size
+            self.make_vocab()
+        else:
+            self.char_model = False
+            self.make_vocab()
+            self.word_set = None
         self.splits = {}
         for s in ['train', 'valid', 'test']:
             self.splits[s] = self.tokenize(os.path.join(data_dir, s + '.txt'))
         random.shuffle(self.splits['train'])
         self.vocab_size = len(self.idx2word)
         self.current = 0
+
+    def make_vocab(self):
+        self.word_counts = collections.Counter()
+        self.add_word('<s>', special=True)  # zero_input is padded to the front in the model
+        self.add_word('<p>', special=True)  # to pad after eos
+        self.add_word('<e>', special=True)  # eos
+        self.add_word('<u>', special=True)  # unknown word token
+        for s in ['train', 'valid', 'test']:
+            self.prepare_vocab(os.path.join(self.data_dir, s + '.txt'))
+        self.idx2word = [w for w, _ in self.word_counts.most_common(self.vocab_size)]
+        self.word2idx = {w: i for i, w in enumerate(self.idx2word)}
+
 
     def add_word(self, word, special=False):
         '''update word counts. if a word is special, it cannot be pruned when deciding the top
@@ -148,6 +162,8 @@ class LMTask(Task):
                 if self.char_model:
                     chars = []
                     for word in words:
+                        if self.word_set is not None and word not in self.word_set:
+                            word = '<u>'
                         if word == '<u>':
                             chars.append(word)
                         else:
