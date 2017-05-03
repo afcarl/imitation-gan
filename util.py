@@ -112,9 +112,11 @@ class Task(object):
 
 
 class LMTask(Task):
-    def __init__(self, seq_len, vocab_size, data_dir, char_model, word_vocab):
+    def __init__(self, seq_len, vocab_size, data_dir, char_model, word_vocab, single_word):
         super(LMTask, self).__init__(seq_len, vocab_size)
         self.data_dir = data_dir
+        self.single_word = False
+        self.word_set = None
         if char_model:
             self.char_model = False
             self.vocab_size = word_vocab
@@ -126,7 +128,8 @@ class LMTask(Task):
         else:
             self.char_model = False
             self.make_vocab()
-            self.word_set = None
+            self.word_set = set(self.idx2word)
+        self.single_word = single_word
         self.splits = {}
         for s in ['train', 'valid', 'test']:
             self.splits[s] = self.tokenize(os.path.join(data_dir, s + '.txt'))
@@ -145,7 +148,6 @@ class LMTask(Task):
         self.idx2word = [w for w, _ in self.word_counts.most_common(self.vocab_size)]
         self.word2idx = {w: i for i, w in enumerate(self.idx2word)}
 
-
     def add_word(self, word, special=False):
         '''update word counts. if a word is special, it cannot be pruned when deciding the top
            words to keep'''
@@ -159,11 +161,17 @@ class LMTask(Task):
         with open(path, 'r') as f:
             for line in f:
                 words = line.strip().replace('<unk>', '<u>').split()
+                if self.word_set is not None:
+                    words = [(w if w in self.word_set else '<u>') for w in words]
+                    if self.single_word:
+                        words = [w for w in words if w != '<u>']
+                        if words:
+                            words = [random.choice(words)]
+                        else:
+                            words = [random.choice(self.idx2word[4:])]  # 4 specials
                 if self.char_model:
                     chars = []
                     for word in words:
-                        if self.word_set is not None and word not in self.word_set:
-                            word = '<u>'
                         if word == '<u>':
                             chars.append(word)
                         else:

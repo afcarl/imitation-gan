@@ -206,6 +206,7 @@ if __name__ == '__main__':
     parser.add_argument('--lm_char', type=int, default=1, help='1 for character level model')
     parser.add_argument('--lm_word_vocab', type=int, default=15000,
                         help='word vocab size for char LM')
+    parser.add_argument('--lm_single_word', type=int, default=0, help='single word GAN')
     parser.add_argument('--print_every', type=int, default=25,
                         help='print losses every these many steps')
     parser.add_argument('--plot_every', type=int, default=1,
@@ -243,7 +244,7 @@ if __name__ == '__main__':
         task = util.LongtermTask(opt.seq_len, opt.vocab_size)
     elif opt.task == 'lm':
         task = util.LMTask(opt.seq_len, opt.vocab_size, opt.lm_data_dir, opt.lm_char,
-                           opt.lm_word_vocab)
+                           opt.lm_word_vocab, opt.lm_single_word)
         if task.vocab_size != opt.vocab_size:
             opt.vocab_size = task.vocab_size
             print('Updated vocab_size:', opt.vocab_size)
