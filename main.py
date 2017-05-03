@@ -145,11 +145,11 @@ if __name__ == '__main__':
     parser.add_argument('--save_overwrite', type=int, default=1, help='overwrite same save files')
     parser.add_argument('--niter', type=int, default=1000000, help='number of iters to train for')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
-    parser.add_argument('--seq_len', type=int, default=50, help='sequence length')
+    parser.add_argument('--seq_len', type=int, default=8, help='sequence length')
     parser.add_argument('--vocab_size', type=int, default=60, help='vocab size for data')
     parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
-    parser.add_argument('--actor_hidden_size', type=int, default=512, help='Actor RNN hidden size')
-    parser.add_argument('--critic_hidden_size', type=int, default=512,
+    parser.add_argument('--actor_hidden_size', type=int, default=256, help='Actor RNN hidden size')
+    parser.add_argument('--critic_hidden_size', type=int, default=256,
                         help='Critic RNN hidden size')
     parser.add_argument('--critic_layers', type=int, default=1)
     parser.add_argument('--critic_dropout', type=float, default=0.0)
@@ -163,9 +163,9 @@ if __name__ == '__main__':
     parser.add_argument('--gamma_inc', type=float, default=0.0,
                         help='the amount by which to increase gamma at each turn')
     # 1e-3 without decay for text, >1e-3 for toys:
-    parser.add_argument('--entropy_reg', type=float, default=5e-2,  # crucial.
+    parser.add_argument('--entropy_reg', type=float, default=1e-3,  # crucial.
                         help='policy entropy regularization')
-    parser.add_argument('--entropy_decay', type=float, default=0.995,
+    parser.add_argument('--entropy_decay', type=float, default=1.0,
                         help='policy entropy regularization weight decay per turn')
     parser.add_argument('--entropy_reg_min', type=float, default=5e-4,
                         help='minimum policy entropy regularization')
@@ -176,7 +176,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_advantage', type=int, default=1)
     parser.add_argument('--exp_replay_buffer', type=int, default=0,
                         help='use a replay buffer with an exponential distribution')
-    parser.add_argument('--real_multiplier', type=float, default=10.0,  # crucial
+    parser.add_argument('--real_multiplier', type=float, default=7.0,  # crucial
                         help='weight for real samples as compared to fake for critic learning')
     parser.add_argument('--replay_actors', type=int, default=10,  # higher with exp buffer
                         help='number of actors for experience replay')
@@ -193,9 +193,9 @@ if __name__ == '__main__':
     parser.add_argument('--gradient_penalty', type=float, default=10)
     parser.add_argument('--max_grad_norm', type=float, default=5.0,
                         help='norm for gradient clipping')
-    parser.add_argument('--critic_iters', type=int, default=20,  # 20 or 25 for larger tasks
+    parser.add_argument('--critic_iters', type=int, default=25,  # 20 or 25 for larger tasks
                         help='number of critic iters per turn')  # crucial
-    parser.add_argument('--actor_iters', type=int, default=15,  # 15 or 20 for larger tasks
+    parser.add_argument('--actor_iters', type=int, default=20,  # 15 or 20 for larger tasks
                         help='number of actor iters per turn')  # crucial
     parser.add_argument('--burnin', type=int, default=25, help='number of burnin iterations')
     parser.add_argument('--burnin_actor_iters', type=int, default=1)
@@ -204,9 +204,9 @@ if __name__ == '__main__':
     parser.add_argument('--task', type=str, default='lm', help='one of lm/longterm/words')
     parser.add_argument('--lm_data_dir', type=str, default='data/penn')
     parser.add_argument('--lm_char', type=int, default=1, help='1 for character level model')
-    parser.add_argument('--lm_word_vocab', type=int, default=15000,
+    parser.add_argument('--lm_word_vocab', type=int, default=1000,
                         help='word vocab size for char LM')
-    parser.add_argument('--lm_single_word', type=int, default=0, help='single word GAN')
+    parser.add_argument('--lm_single_word', type=int, default=1, help='single word GAN')
     parser.add_argument('--print_every', type=int, default=25,
                         help='print losses every these many steps')
     parser.add_argument('--plot_every', type=int, default=1,
