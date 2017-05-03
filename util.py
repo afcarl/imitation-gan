@@ -129,6 +129,8 @@ class LMTask(Task):
             self.char_model = False
             self.make_vocab()
             self.word_set = set(self.idx2word)
+        self.trunc_word_set = set(w[:seq_len] for w in self.word_set)
+        assert len(self.trunc_word_set) <= len(self.word_set)
         self.single_word = single_word
         self.splits = {}
         for s in ['train', 'valid', 'test']:
@@ -224,6 +226,32 @@ class LMTask(Task):
             for w in s:
                 print(self.idx2word[w], end=end)
             print()
+
+    def solved(self, data):
+        if self.single_word:
+            fail = 0
+            succ = 0
+            for dword in data:
+                chars = [self.idx2word[d] for d in dword]
+                strip = 0
+                idx = len(chars) - 1
+                while idx >= 0:
+                    if chars[idx] != '<p>':
+                        break
+                    idx -= 1
+                if idx != len(chars) - 1 and chars[idx] != '<e>':
+                    fail += 1
+                    continue
+                if chars[idx] == '<e>':
+                    idx -= 1
+                word = ''.join(chars[:idx+1])
+                if word in self.trunc_word_set:
+                    succ += 1
+                else:
+                    fail += 1
+            if succ / (succ + fail) > 0.75:
+                return True
+        return False
 
 
 class WordsTask(Task):

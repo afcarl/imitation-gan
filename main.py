@@ -171,7 +171,7 @@ if __name__ == '__main__':
                         help='minimum policy entropy regularization')
     parser.add_argument('--critic_entropy_reg', type=float, default=0.0,  # <= 1e-3
                         help='critic entropy regularization')
-    parser.add_argument('--smooth_zero', type=float, default=1e-2,
+    parser.add_argument('--smooth_zero', type=float, default=2e-3,  # 1e-2 for larger tasks
                         help='s, use c^2/2s instead of c-(s/2) when abs critic score c<s')
     parser.add_argument('--use_advantage', type=int, default=1)
     parser.add_argument('--exp_replay_buffer', type=int, default=0,
@@ -182,9 +182,9 @@ if __name__ == '__main__':
                         help='number of actors for experience replay')
     parser.add_argument('--replay_actors_half', type=int, default=3,
                         help='number of recent actors making up half of the exponential replay')
-    parser.add_argument('--solved_threshold', type=int, default=200,
+    parser.add_argument('--solved_threshold', type=int, default=10,  # 200 for complex tasks
                         help='conseq steps the task (if appl) has been solved for before exit')
-    parser.add_argument('--solved_max_fail', type=int, default=10,
+    parser.add_argument('--solved_max_fail', type=int, default=3,  # 10 for complex tasks
                         help='maximum number of failures before solved streak is reset')
     parser.add_argument('--optimizer', type=str, default='Adam')
     parser.add_argument('--learning_rate', type=float, default=1e-4)
@@ -460,10 +460,8 @@ if __name__ == '__main__':
 
         if opt.task == 'longterm':
             params = [avgprobs]
-        elif opt.task == 'words':
+        elif opt.task == 'words' or opt.task == 'lm':
             generated = generated.data.cpu().numpy()
-            if print_generated and actor_iters == 1:
-                generated = generated[:-1]
             params = [generated]
         else:
             params = [None]
