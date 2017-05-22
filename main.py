@@ -395,8 +395,6 @@ if __name__ == '__main__':
                 # signal, possibly helping train faster. however, critic errors on less likely
                 # actions can have a worse effect on actor training as compared to considering only
                 # the selected action.
-                # TODO instead of all actions, consider k sampled actions as per policy.
-                #      actions likely under the policy should have more reliable critic scores.
                 loss = (all_probs.detach() * disadv * all_logprobs).sum() / \
                        (opt.batch_size - int(print_generated))
                 disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
