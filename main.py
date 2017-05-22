@@ -157,6 +157,10 @@ if __name__ == '__main__':
                         help='epsilon for eps sampling. results in biased policy gradient')
     parser.add_argument('--eps_for_critic', type=int, default=0,
                         help='enable eps sampling of actor during critic training')
+    parser.add_argument('--freeze_actor', type=int, default=-1,
+                        help='freeze actor after these many steps')
+    parser.add_argument('--freeze_critic', type=int, default=-1,
+                        help='freeze critic after these many steps')
     parser.add_argument('--actor_optimize_all', type=int, default=1,
                         help='optimize all actions per timestep (not only the selected ones)')
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
@@ -296,136 +300,138 @@ if __name__ == '__main__':
             break
         actor.eps_sample = bool(opt.eps_for_critic) and opt.eps > 1e-8
 
-        # train critic
-        for param in critic.parameters():  # reset requires_grad
-            param.requires_grad = True  # they are set to False below in actor update
-        if cur_iter < opt.burnin:
-            critic_iters = opt.burnin_critic_iters
-        else:
-            critic_iters = opt.critic_iters
-        Wdists = []
-        err_r = []
-        err_f = []
-        critic_gnorms = []
-        for critic_i in xrange(critic_iters):
-            critic.zero_grad()
+        if opt.freeze_critic < 0 or cur_iter < opt.freeze_critic:
+            # train critic
+            for param in critic.parameters():  # reset requires_grad
+                param.requires_grad = True  # they are set to False below in actor update
+            if cur_iter < opt.burnin:
+                critic_iters = opt.burnin_critic_iters
+            else:
+                critic_iters = opt.critic_iters
+            Wdists = []
+            err_r = []
+            err_f = []
+            critic_gnorms = []
+            for critic_i in xrange(critic_iters):
+                critic.zero_grad()
 
-            generated, _, _, _ = actor()
-            buffer.push(generated.data.cpu().numpy())
-            generated = buffer.sample(opt.batch_size)
-            generated = torch.from_numpy(generated).cuda()
-            costs, _ = critic(generated)
-            norm_costs = costs / costs.sum(2).expand_as(costs)
-            entropy = -((1e-6 + norm_costs) * torch.log(1e-6 + norm_costs)).sum() / opt.batch_size
-            costs = costs.gather(2, Variable(generated.unsqueeze(2))).squeeze(2)
-            E_generated = costs.sum() / opt.batch_size
-            loss = -E_generated - (opt.critic_entropy_reg * entropy)
-            loss.backward()
-
-            real = torch.from_numpy(task.get_data(opt.batch_size)).cuda()
-            costs, _ = critic(real)
-            norm_costs = costs / costs.sum(2).expand_as(costs)
-            entropy = -((1e-6 + norm_costs) * torch.log(1e-6 + norm_costs)).sum() / opt.batch_size
-            costs = costs.gather(2, Variable(real.unsqueeze(2))).squeeze(2)
-            E_real = costs.sum() / opt.batch_size
-            loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy)
-            loss.backward()
-
-            if opt.gradient_penalty > 0:
-                critic.gradient_penalize = True
-                costs, inputs = critic((real, generated))
-                costs = costs * inputs[:, 1:]
-                loss = ((opt.real_multiplier + 1) / 2) * costs.sum()
-                inputs_grad, = autograd.grad([loss], [inputs], create_graph=True)
-                inputs_grad = inputs_grad.view(opt.batch_size, -1)
-                norm_errors = torch.sqrt((inputs_grad ** 2).sum(1)) - 1
-                loss = opt.gradient_penalty * (norm_errors ** 2).sum() / opt.batch_size
+                generated, _, _, _ = actor()
+                buffer.push(generated.data.cpu().numpy())
+                generated = buffer.sample(opt.batch_size)
+                generated = torch.from_numpy(generated).cuda()
+                costs, _ = critic(generated)
+                norm_costs = costs / costs.sum(2).expand_as(costs)
+                entropy = -((1e-6 + norm_costs) * torch.log(1e-6 + norm_costs)).sum() / opt.batch_size
+                costs = costs.gather(2, Variable(generated.unsqueeze(2))).squeeze(2)
+                E_generated = costs.sum() / opt.batch_size
+                loss = -E_generated - (opt.critic_entropy_reg * entropy)
                 loss.backward()
-                critic.gradient_penalize = False
 
-            critic_gnorms.append(util.gradient_norm(critic.parameters()))
-            nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
-            critic_optimizer.step()
-            Wdist = (E_generated - E_real).data[0]
-            Wdists.append(Wdist)
-            err_r.append(E_real.data[0])
-            err_f.append(E_generated.data[0])
+                real = torch.from_numpy(task.get_data(opt.batch_size)).cuda()
+                costs, _ = critic(real)
+                norm_costs = costs / costs.sum(2).expand_as(costs)
+                entropy = -((1e-6 + norm_costs) * torch.log(1e-6 + norm_costs)).sum() / opt.batch_size
+                costs = costs.gather(2, Variable(real.unsqueeze(2))).squeeze(2)
+                E_real = costs.sum() / opt.batch_size
+                loss = (opt.real_multiplier * E_real) - (opt.critic_entropy_reg * entropy)
+                loss.backward()
 
-        # train actor
-        for param in critic.parameters():
-            param.requires_grad = False  # to avoid computation
-        if cur_iter < opt.burnin:
-            actor_iters = opt.burnin_actor_iters
-        else:
-            actor_iters = opt.actor_iters
-        if cur_iter % opt.gen_every == 0:
-            # disable eps_sample since we intend to visualize a (noiseless) generation.
-            print_generated = True
-            actor.eps_sample = False
-        else:
-            print_generated = False
-            actor.eps_sample = opt.eps > 1e-8
-        entropy_reg = max(opt.entropy_reg * (opt.entropy_decay ** cur_iter), opt.entropy_reg_min)
+                if opt.gradient_penalty > 0:
+                    critic.gradient_penalize = True
+                    costs, inputs = critic((real, generated))
+                    costs = costs * inputs[:, 1:]
+                    loss = ((opt.real_multiplier + 1) / 2) * costs.sum()
+                    inputs_grad, = autograd.grad([loss], [inputs], create_graph=True)
+                    inputs_grad = inputs_grad.view(opt.batch_size, -1)
+                    norm_errors = torch.sqrt((inputs_grad ** 2).sum(1)) - 1
+                    loss = opt.gradient_penalty * (norm_errors ** 2).sum() / opt.batch_size
+                    loss.backward()
+                    critic.gradient_penalize = False
 
-        actor_gnorms = []
-        for actor_i in xrange(actor_iters):
-            actor.zero_grad()
-            all_generated, all_logprobs, all_probs, avgprobs = actor()
-            if print_generated:  # last sample is real, for debugging. do not train on it!
-                all_generated = torch.cat([all_generated[:-1],
-                                           torch.from_numpy(task.get_data(1)).cuda()], 0)
-                all_logprobs = all_logprobs[:-1]
-                all_probs = all_probs[:-1]
-                generated = all_generated[:-1]
+                critic_gnorms.append(util.gradient_norm(critic.parameters()))
+                nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
+                critic_optimizer.step()
+                Wdist = (E_generated - E_real).data[0]
+                Wdists.append(Wdist)  # FIXME these need to be updated even when freeze_critic
+                err_r.append(E_real.data[0])
+                err_f.append(E_generated.data[0])
+
+        if opt.freeze_actor < 0 or cur_iter < opt.freeze_actor:
+            # train actor
+            for param in critic.parameters():
+                param.requires_grad = False  # to avoid computation
+            if cur_iter < opt.burnin:
+                actor_iters = opt.burnin_actor_iters
             else:
-                generated = all_generated
-            logprobs = all_logprobs.gather(2, generated.unsqueeze(2)).squeeze(2)
-            all_costs, _ = critic(all_generated.data)
-            if print_generated:
-                costs = all_costs[:-1]
+                actor_iters = opt.actor_iters
+            if cur_iter % opt.gen_every == 0:
+                # disable eps_sample since we intend to visualize a (noiseless) generation.
+                print_generated = True
+                actor.eps_sample = False
             else:
-                costs = all_costs
-            if opt.use_advantage:
-                baseline = (costs * all_probs).detach().sum(2).expand_as(costs)
-                disadv = costs - baseline
-            else:
-                disadv = costs
-            if opt.actor_optimize_all:
-                # consider all possible actions at each timestep. this provides much more training
-                # signal, possibly helping train faster. however, critic errors on less likely
-                # actions can have a worse effect on actor training as compared to considering only
-                # the selected action.
-                loss = (all_probs.detach() * disadv * all_logprobs).sum() / \
-                       (opt.batch_size - int(print_generated))
-                disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
-            else:
-                disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
-                loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
-            entropy = -(all_probs * all_logprobs).sum() / (opt.batch_size - int(print_generated))
-            loss -= entropy_reg * entropy
-            loss.backward()
-            actor_gnorms.append(util.gradient_norm(actor.parameters()))
-            nn.utils.clip_grad_norm(actor.parameters(), opt.max_grad_norm)
-            actor_optimizer.step()
-            if print_generated:
-                costs = all_costs.gather(2, all_generated.unsqueeze(2)).squeeze(2)
-                # print generated only in the first actor iteration
-                print('Generated (last row is real):')
-                task.display(all_generated.data.cpu().numpy())
-                print()
-                print('Critic costs (last row is real):')
-                print(costs.data.cpu().numpy(), '\n')
-                print('Critic cost sums (last element is real):')
-                print(costs.data.cpu().numpy().sum(1), '\n')
-                if opt.use_advantage:
-                    print('Critic advantages (real not included):')
-                    print(-disadv.data.cpu().numpy(), '\n')
-                if opt.task == 'longterm':
-                    print('Batch-averaged step-wise probs:')
-                    print(avgprobs, '\n')
                 print_generated = False
                 actor.eps_sample = opt.eps > 1e-8
-        critic.gamma = min(critic.gamma + opt.gamma_inc, 1.0)
+            entropy_reg = max(opt.entropy_reg * (opt.entropy_decay ** cur_iter), opt.entropy_reg_min)
+
+            actor_gnorms = []
+            for actor_i in xrange(actor_iters):
+                actor.zero_grad()
+                all_generated, all_logprobs, all_probs, avgprobs = actor()
+                if print_generated:  # last sample is real, for debugging. do not train on it!
+                    all_generated = torch.cat([all_generated[:-1],
+                                               torch.from_numpy(task.get_data(1)).cuda()], 0)
+                    all_logprobs = all_logprobs[:-1]
+                    all_probs = all_probs[:-1]
+                    generated = all_generated[:-1]
+                else:
+                    generated = all_generated
+                logprobs = all_logprobs.gather(2, generated.unsqueeze(2)).squeeze(2)
+                all_costs, _ = critic(all_generated.data)
+                if print_generated:
+                    costs = all_costs[:-1]
+                else:
+                    costs = all_costs
+                if opt.use_advantage:
+                    baseline = (costs * all_probs).detach().sum(2).expand_as(costs)
+                    disadv = costs - baseline
+                else:
+                    disadv = costs
+                if opt.actor_optimize_all:
+                    # consider all possible actions at each timestep. this provides much more training
+                    # signal, possibly helping train faster. however, critic errors on less likely
+                    # actions can have a worse effect on actor training as compared to considering only
+                    # the selected action.
+                    loss = (all_probs.detach() * disadv * all_logprobs).sum() / \
+                           (opt.batch_size - int(print_generated))
+                    disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
+                else:
+                    disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
+                    loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
+                entropy = -(all_probs * all_logprobs).sum() / (opt.batch_size - int(print_generated))
+                loss -= entropy_reg * entropy
+                loss.backward()
+                actor_gnorms.append(util.gradient_norm(actor.parameters()))
+                nn.utils.clip_grad_norm(actor.parameters(), opt.max_grad_norm)
+                actor_optimizer.step()
+                if print_generated:
+                    costs = all_costs.gather(2, all_generated.unsqueeze(2)).squeeze(2)
+                    # print generated only in the first actor iteration
+                    print('Generated (last row is real):')
+                    task.display(all_generated.data.cpu().numpy())
+                    print()
+                    print('Critic costs (last row is real):')
+                    print(costs.data.cpu().numpy(), '\n')
+                    print('Critic cost sums (last element is real):')
+                    print(costs.data.cpu().numpy().sum(1), '\n')
+                    if opt.use_advantage:
+                        print('Critic advantages (real not included):')
+                        print(-disadv.data.cpu().numpy(), '\n')
+                    if opt.task == 'longterm':
+                        print('Batch-averaged step-wise probs:')
+                        print(avgprobs, '\n')
+                    print_generated = False
+                    actor.eps_sample = opt.eps > 1e-8
+            critic.gamma = min(critic.gamma + opt.gamma_inc, 1.0)
 
         if cur_iter % opt.print_every == 0:
             print(cur_iter, ':\tWdist:', np.array(Wdists).mean(), '\terr R:',
@@ -458,13 +464,13 @@ if __name__ == '__main__':
             fig.savefig(opt.save + '/grads.png')
             plt.close()
 
+        params = [None]
         if opt.task == 'longterm':
             params = [avgprobs]
         elif opt.task == 'words' or opt.task == 'lm':
+            # FIXME doesn't work with freeze_actor
             generated = generated.data.cpu().numpy()
             params = [generated]
-        else:
-            params = [None]
         if task.solved(*params):
             solved += 1
         else:
