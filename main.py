@@ -323,9 +323,11 @@ if __name__ == '__main__':
             generated = torch.from_numpy(generated).cuda()
             costs, _ = critic(generated)
             norm_costs = costs / costs.sum(2).expand_as(costs)
-            if train_critic:
+            if train_critic and opt.critic_entropy_reg > 0:
                 entropy = -((1e-6 + norm_costs) * torch.log(1e-6 + norm_costs)).sum() / \
                           opt.batch_size
+            else:
+                entropy = 0.0
             costs = costs.gather(2, Variable(generated.unsqueeze(2))).squeeze(2)
             E_generated = costs.sum() / opt.batch_size
             if train_critic:
@@ -335,9 +337,11 @@ if __name__ == '__main__':
             real = torch.from_numpy(task.get_data(opt.batch_size)).cuda()
             costs, _ = critic(real)
             norm_costs = costs / costs.sum(2).expand_as(costs)
-            if train_critic:
+            if train_critic and opt.critic_entropy_reg > 0:
                 entropy = -((1e-6 + norm_costs) * torch.log(1e-6 + norm_costs)).sum() / \
                           opt.batch_size
+            else:
+                entropy = 0.0
             costs = costs.gather(2, Variable(real.unsqueeze(2))).squeeze(2)
             E_real = costs.sum() / opt.batch_size
             if train_critic:
@@ -351,8 +355,9 @@ if __name__ == '__main__':
                 loss = ((opt.real_multiplier + 1) / 2) * costs.sum()
                 inputs_grad, = autograd.grad([loss], [inputs], create_graph=True)
                 inputs_grad = inputs_grad.view(opt.batch_size, -1)
-                norm_errors = torch.sqrt((inputs_grad ** 2).sum(1)) - 1
-                loss = opt.gradient_penalty * (norm_errors ** 2).sum() / opt.batch_size
+                norm_sq = (inputs_grad ** 2).sum(1)
+                norm_errors = norm_sq - 2 * torch.sqrt(norm_sq) + 1
+                loss = opt.gradient_penalty * norm_errors.sum() / opt.batch_size
                 loss.backward()
                 critic.gradient_penalize = False
 
