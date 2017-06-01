@@ -77,7 +77,6 @@ class Costs(nn.Module):
         self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
         self.zero_state = torch.zeros([opt.costs_layers, opt.batch_size,
                                        opt.costs_hidden_size]).cuda()
-        self.gamma = opt.gamma
         self.gradient_penalize = False
 
     def forward(self, actions):
@@ -107,13 +106,6 @@ class Costs(nn.Module):
         flat_costs = self.cost(flattened)
         costs = flat_costs.view(self.opt.batch_size, self.opt.seq_len + 1, self.opt.vocab_size)
         costs = costs[:, :-1]  # account for the padding
-        if self.gamma < 1.0 - 1e-8:
-            discount = torch.cuda.FloatTensor([self.gamma ** i for i in xrange(self.opt.seq_len)])
-            discount = discount.unsqueeze(0).unsqueeze(2).expand(self.opt.batch_size,
-                                                                 self.opt.seq_len,
-                                                                 self.opt.vocab_size)
-            discount = Variable(discount)
-            costs = costs * discount
         costs_abs = torch.abs(costs)
         if self.opt.smooth_zero > 1e-4:
             select = (costs_abs >= self.opt.smooth_zero).float()
@@ -151,9 +143,6 @@ if __name__ == '__main__':
                         help='freeze costs after these many steps')
     parser.add_argument('--actor_optimize_all', type=int, default=1,
                         help='optimize all actions per timestep (not only the selected ones)')
-    parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
-    parser.add_argument('--gamma_inc', type=float, default=0.0,
-                        help='the amount by which to increase gamma at each turn')
     # 1e-3 without decay for text, >1e-3 for toys:
     parser.add_argument('--entropy_reg', type=float, default=1e-3,  # crucial.
                         help='policy entropy regularization')
@@ -436,7 +425,6 @@ if __name__ == '__main__':
                     print('Batch-averaged step-wise probs:')
                     print(avgprobs, '\n')
                 print_generated = False
-        costs.gamma = min(costs.gamma + opt.gamma_inc, 1.0)
 
         if cur_iter % opt.print_every == 0:
             extra = []
@@ -446,9 +434,9 @@ if __name__ == '__main__':
                 extra.append('costs frozen')
             extra = ', '.join(extra)
             print(cur_iter, ':\tWdist:', np.array(Wdists).mean(), '\terr R:',
-                  np.array(err_r).mean(), '\terr F:', np.array(err_f).mean(), '\tgamma:',
-                  costs.gamma, '\tentropy_reg:', entropy_reg, '\tsolved:', solved,
-                  '\tsolved_fail:', solved_fail, '\t[' + extra + ']')
+                  np.array(err_r).mean(), '\terr F:', np.array(err_f).mean(), '\tentropy_reg:',
+                  entropy_reg, '\tsolved:', solved, '\tsolved_fail:', solved_fail,
+                  '\t[' + extra + ']')
             train_log.write('%.4f\t%.4f\t%.4f\n' % (np.array(Wdists).mean(), np.array(err_r).mean(),
                             np.array(err_f).mean()))
             train_log.flush()
