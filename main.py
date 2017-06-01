@@ -126,7 +126,8 @@ class Critic(nn.Module):
         self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.critic_hidden_size,
                           num_layers=opt.critic_layers, dropout=opt.critic_dropout,
                           batch_first=True)
-        self.cost = nn.Linear(opt.critic_hidden_size, opt.vocab_size)
+        self.Q = nn.Linear(opt.critic_hidden_size, opt.vocab_size)
+        self.V = nn.Linear(opt.critic_hidden_size, 1)
         self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
         self.zero_state = torch.zeros([opt.critic_layers, opt.batch_size,
                                        opt.critic_hidden_size]).cuda()
@@ -137,10 +138,12 @@ class Critic(nn.Module):
         outputs, _ = self.rnn(inputs, Variable(self.zero_state))
         outputs = outputs.contiguous()
         flattened = outputs.view(-1, self.opt.critic_hidden_size)
-        flat_costs = self.cost(flattened)
-        costs = flat_costs.view(self.opt.batch_size, self.opt.seq_len + 1, self.opt.vocab_size)
-        costs = costs[:, :-1]  # account for the padding
-        return costs  # TODO has to be Q, V
+        flat_Q = self.Q(flattened)
+        flat_V = self.V(flattened)
+        Q = flat_Q.view(self.opt.batch_size, self.opt.seq_len + 1, self.opt.vocab_size)
+        V = flat_V.view(self.opt.batch_size, self.opt.seq_len + 1)
+        # account for the padding
+        return Q[:, :-1], V[:, :-1]
 
 
 if __name__ == '__main__':
