@@ -378,12 +378,12 @@ if __name__ == '__main__':
                 costs = all_costs[:-1]
             else:
                 costs = all_costs
+            # TODO do all this with critic values
             if opt.use_advantage:
                 baseline = (costs * all_probs).detach().sum(2).expand_as(costs)
                 disadv = costs - baseline
             else:
                 disadv = costs
-            # TODO do this gathering in costsnet itself
             disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
             if train_actor:
                 loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
