@@ -25,7 +25,7 @@ import util
 
 
 class Actor(nn.Module):
-    '''The imitation GAN policy network.'''
+    '''The imitation GAN policy network (generator).'''
 
     def __init__(self, opt):
         super(Actor, self).__init__()
@@ -64,7 +64,7 @@ class Actor(nn.Module):
 
 
 class CostsNet(nn.Module):
-    '''The imitation GAN costs network.'''
+    '''The imitation GAN costs network (discriminator).'''
 
     def __init__(self, opt):
         super(CostsNet, self).__init__()
@@ -116,8 +116,8 @@ class CostsNet(nn.Module):
             return costs_abs, onehot_actions
 
 
-class Critic(nn.Module):  # TODO
-    '''The imitation GAN costs network.'''
+class Critic(nn.Module):
+    '''The imitation GAN critic used for stable training of the actor.'''
 
     def __init__(self, opt):
         super(Critic, self).__init__()
@@ -130,43 +130,17 @@ class Critic(nn.Module):  # TODO
         self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
         self.zero_state = torch.zeros([opt.critic_layers, opt.batch_size,
                                        opt.critic_hidden_size]).cuda()
-        self.gradient_penalize = False
 
     def forward(self, actions):
-        if self.gradient_penalize:
-            # actions is tuple of (real_batch, fake_batch)
-            real, fake = actions
-            padded_real = torch.cat([self.zero_input, real], 1)
-            padded_fake = torch.cat([self.zero_input, fake], 1)
-            onehot_real = torch.zeros(padded_real.size() + (self.opt.vocab_size,)).cuda()
-            onehot_fake = torch.zeros(padded_fake.size() + (self.opt.vocab_size,)).cuda()
-            padded_real.unsqueeze_(2)
-            padded_fake.unsqueeze_(2)
-            onehot_real.scatter_(2, padded_real, 1)
-            onehot_fake.scatter_(2, padded_fake, 1)
-            alpha = torch.rand(real.size(0)).unsqueeze(1).unsqueeze(2).expand_as(onehot_real).cuda()
-            onehot_actions = (alpha * onehot_real) + ((1 - alpha) * onehot_fake)
-            onehot_actions = Variable(onehot_actions, requires_grad=True)
-            inputs = torch.mm(onehot_actions.view(-1, self.opt.vocab_size), self.embedding.weight)
-            inputs = inputs.view(onehot_actions.size(0), -1, self.opt.emb_size)
-        else:
-            padded_actions = torch.cat([self.zero_input, actions], 1)
-            inputs = self.embedding(Variable(padded_actions))
-            onehot_actions = None
+        padded_actions = torch.cat([self.zero_input, actions], 1)
+        inputs = self.embedding(Variable(padded_actions))
         outputs, _ = self.rnn(inputs, Variable(self.zero_state))
         outputs = outputs.contiguous()
         flattened = outputs.view(-1, self.opt.critic_hidden_size)
         flat_costs = self.cost(flattened)
         costs = flat_costs.view(self.opt.batch_size, self.opt.seq_len + 1, self.opt.vocab_size)
         costs = costs[:, :-1]  # account for the padding
-        costs_abs = torch.abs(costs)
-        if self.opt.smooth_zero > 1e-4:
-            select = (costs_abs >= self.opt.smooth_zero).float()
-            costs_abs = costs_abs - (self.opt.smooth_zero / 2)
-            costs_sq = (costs ** 2) / (self.opt.smooth_zero * 2)
-            return (select * costs_abs) + ((1.0 - select) * costs_sq), onehot_actions
-        else:
-            return costs_abs, onehot_actions
+        return costs  # TODO has to be Q, V
 
 
 if __name__ == '__main__':
