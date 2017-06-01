@@ -417,10 +417,6 @@ if __name__ == '__main__':
         actor_gnorms = []
         critic_gnorms = []
         for actor_i in xrange(actor_iters):
-            if train_actor:
-                actor.zero_grad()
-            if train_critic:
-                critic.zero_grad()
             all_generated, all_logprobs, all_probs, avgprobs = actor()
             if print_generated:  # last sample is real, for debugging. do not train on it!
                 all_generated = torch.cat([all_generated[:-1],
@@ -433,7 +429,7 @@ if __name__ == '__main__':
             logprobs = all_logprobs.gather(2, generated.unsqueeze(2)).squeeze(2)
             all_costs, _ = costsnet(all_generated.data)
             all_values = critic(all_generated.data)
-            all_costs = all_costs.gather(2, generated.unsqueeze(2)).squeeze(2)
+            all_costs = all_costs.gather(2, all_generated.unsqueeze(2)).squeeze(2)
             all_returns = Variable(torch.zeros(all_costs.size()).cuda())
             for ret_i in xrange(opt.reward_steps):
                 if ret_i > 0:
@@ -458,8 +454,9 @@ if __name__ == '__main__':
             else:
                 disadv = all_disadv
             if train_critic:
+                critic.zero_grad()
                 loss = (disadv ** 2).sum() / (opt.batch_size - int(print_generated))
-                loss.backward()
+                loss.backward(retain_variables=True)
             critic_gnorms.append(util.gradient_norm(critic.parameters()))
             if train_critic:
                 if opt.max_grad_norm > 0:
@@ -468,6 +465,7 @@ if __name__ == '__main__':
             if train_actor:
                 # this has to be done after critic optimization step since loss.backward() will
                 # accumulate gradients into value function approx as well.
+                actor.zero_grad()
                 # TODO optimize_all can be done to train actor using critic
                 loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
                 entropy = -(all_probs * all_logprobs).sum() / \
