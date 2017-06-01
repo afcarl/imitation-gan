@@ -141,8 +141,6 @@ if __name__ == '__main__':
                         help='freeze actor after these many steps')
     parser.add_argument('--freeze_costs', type=int, default=-1,
                         help='freeze costs after these many steps')
-    parser.add_argument('--actor_optimize_all', type=int, default=1,
-                        help='optimize all actions per timestep (not only the selected ones)')
     # 1e-3 without decay for text, >1e-3 for toys:
     parser.add_argument('--entropy_reg', type=float, default=1e-3,  # crucial.
                         help='policy entropy regularization')
@@ -385,19 +383,10 @@ if __name__ == '__main__':
                 disadv = costs - baseline
             else:
                 disadv = costs
-            if opt.actor_optimize_all:
-                # consider all possible actions at each timestep. this provides much more training
-                # signal, possibly helping train faster. however, costs errors on less likely
-                # actions can have a worse effect on actor training as compared to considering only
-                # the selected action.
-                if train_actor:
-                    loss = (all_probs.detach() * disadv * all_logprobs).sum() / \
-                           (opt.batch_size - int(print_generated))
-                disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
-            else:
-                disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
-                if train_actor:
-                    loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
+            # TODO do this gathering in costs itself
+            disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
+            if train_actor:
+                loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
             if train_actor:
                 entropy = -(all_probs * all_logprobs).sum() / \
                           (opt.batch_size - int(print_generated))
