@@ -121,13 +121,13 @@ class Critic(nn.Module):
 
     def __init__(self, opt):
         super(Critic, self).__init__()
+        # TODO share some params with actor?
         self.opt = opt
         self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
         self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.critic_hidden_size,
                           num_layers=opt.critic_layers, dropout=opt.critic_dropout,
                           batch_first=True)
-        self.Q = nn.Linear(opt.critic_hidden_size, opt.vocab_size)
-        self.V = nn.Linear(opt.critic_hidden_size, 1)
+        self.value = nn.Linear(opt.critic_hidden_size, 1)
         self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
         self.zero_state = torch.zeros([opt.critic_layers, opt.batch_size,
                                        opt.critic_hidden_size]).cuda()
@@ -138,12 +138,10 @@ class Critic(nn.Module):
         outputs, _ = self.rnn(inputs, Variable(self.zero_state))
         outputs = outputs.contiguous()
         flattened = outputs.view(-1, self.opt.critic_hidden_size)
-        flat_Q = self.Q(flattened)
-        flat_V = self.V(flattened)
-        Q = flat_Q.view(self.opt.batch_size, self.opt.seq_len + 1, self.opt.vocab_size)
-        V = flat_V.view(self.opt.batch_size, self.opt.seq_len + 1)
+        flat_value = self.value(flattened)
+        value = flat_value.view(self.opt.batch_size, self.opt.seq_len + 1)
         # account for the padding
-        return Q[:, :-1], V[:, :-1]
+        return value[:, 1:]
 
 
 if __name__ == '__main__':
@@ -189,6 +187,9 @@ if __name__ == '__main__':
                         help='minimum policy entropy regularization')
     parser.add_argument('--costsnet_entropy_reg', type=float, default=0.0,  # <= 1e-3
                         help='costsnet entropy regularization')
+    parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')  # TODO use
+    parser.add_argument('--reward_steps', type=int, default=1,  # TODO use
+                        help='Number of rewards before critic value for Q estimation')
     parser.add_argument('--smooth_zero', type=float, default=2e-3,  # 1e-2 for larger tasks
                         help='s, use c^2/2s instead of c-(s/2) when abs costsnet score c<s')
     parser.add_argument('--use_advantage', type=int, default=1)
@@ -204,6 +205,7 @@ if __name__ == '__main__':
                         help='conseq steps the task (if appl) has been solved for before exit')
     parser.add_argument('--solved_max_fail', type=int, default=3,  # 10 for complex tasks
                         help='maximum number of failures before solved streak is reset')
+    # TODO RMSprop for actor and critic?
     parser.add_argument('--optimizer', type=str, default='Adam')
     parser.add_argument('--learning_rate', type=float, default=1e-4)
     parser.add_argument('--beta1', type=float, default=0.5)
@@ -215,12 +217,9 @@ if __name__ == '__main__':
                         help='number of actor iters per turn')  # crucial
     parser.add_argument('--costsnet_iters', type=int, default=25,  # 20 or 25 for larger tasks
                         help='number of costsnet iters per turn')  # crucial
-    parser.add_argument('--critic_iters', type=int, default=25,  # TODO investigate
-                        help='number of critic iters per turn')  # crucial
     parser.add_argument('--burnin', type=int, default=25, help='number of burnin iterations')
     parser.add_argument('--burnin_actor_iters', type=int, default=1)
     parser.add_argument('--burnin_costsnet_iters', type=int, default=100)
-    parser.add_argument('--burnin_critic_iters', type=int, default=100)  # TODO
     parser.add_argument('--name', type=str, default='default')
     parser.add_argument('--task', type=str, default='lm', help='one of lm/longterm/words')
     parser.add_argument('--lm_data_dir', type=str, default='data/penn')
