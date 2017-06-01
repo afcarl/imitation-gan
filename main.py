@@ -24,45 +24,6 @@ import torch.optim as optim
 import util
 
 
-class Actor(nn.Module):
-    '''The imitation GAN policy network (generator).'''
-
-    def __init__(self, opt):
-        super(Actor, self).__init__()
-        self.opt = opt
-        self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
-        self.cell = nn.GRUCell(opt.emb_size, opt.actor_hidden_size)
-        self.dist = nn.Linear(opt.actor_hidden_size, opt.vocab_size)
-        #self.dist1 = nn.Linear(opt.actor_hidden_size, opt.emb_size)
-        #self.dist2 = nn.Linear(opt.emb_size, opt.vocab_size)
-        #self.embedding.weight = self.dist2.weight  # tie weights
-        self.zero_input = torch.LongTensor(opt.batch_size).zero_().cuda()
-        self.zero_state = torch.zeros([opt.batch_size, opt.actor_hidden_size]).cuda()
-
-    def forward(self):
-        outputs = []
-        all_logprobs = []
-        all_probs = []
-        probs = []  # for debugging
-        hidden = Variable(self.zero_state)
-        inputs = self.embedding(Variable(self.zero_input))
-        for out_i in xrange(self.opt.seq_len):
-            hidden = self.cell(inputs, hidden)
-            #dist = F.log_softmax(self.dist2(self.dist1(hidden)))
-            dist = F.log_softmax(self.dist(hidden))
-            all_logprobs.append(dist.unsqueeze(1))
-            prob = torch.exp(dist)
-            all_probs.append(prob.unsqueeze(1))
-            prob_new = prob.detach()
-            probs.append(prob.data.mean(0).squeeze(0).cpu().numpy())  # for debugging
-            sampled = torch.multinomial(prob_new, 1)
-            outputs.append(sampled)
-            if out_i < self.opt.seq_len - 1:
-                inputs = self.embedding(sampled.squeeze(1))
-        return (torch.cat(outputs, 1), torch.cat(all_logprobs, 1), torch.cat(all_probs, 1),
-                np.array(probs))
-
-
 class CostsNet(nn.Module):
     '''The imitation GAN costs network (discriminator).'''
 
@@ -142,6 +103,45 @@ class Critic(nn.Module):
         value = flat_value.view(self.opt.batch_size, self.opt.seq_len + 1)
         # account for the padding
         return value[:, :-1]
+
+
+class Actor(nn.Module):
+    '''The imitation GAN policy network (generator).'''
+
+    def __init__(self, opt):
+        super(Actor, self).__init__()
+        self.opt = opt
+        self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
+        self.cell = nn.GRUCell(opt.emb_size, opt.actor_hidden_size)
+        self.dist = nn.Linear(opt.actor_hidden_size, opt.vocab_size)
+        #self.dist1 = nn.Linear(opt.actor_hidden_size, opt.emb_size)
+        #self.dist2 = nn.Linear(opt.emb_size, opt.vocab_size)
+        #self.embedding.weight = self.dist2.weight  # tie weights
+        self.zero_input = torch.LongTensor(opt.batch_size).zero_().cuda()
+        self.zero_state = torch.zeros([opt.batch_size, opt.actor_hidden_size]).cuda()
+
+    def forward(self):
+        outputs = []
+        all_logprobs = []
+        all_probs = []
+        probs = []  # for debugging
+        hidden = Variable(self.zero_state)
+        inputs = self.embedding(Variable(self.zero_input))
+        for out_i in xrange(self.opt.seq_len):
+            hidden = self.cell(inputs, hidden)
+            #dist = F.log_softmax(self.dist2(self.dist1(hidden)))
+            dist = F.log_softmax(self.dist(hidden))
+            all_logprobs.append(dist.unsqueeze(1))
+            prob = torch.exp(dist)
+            all_probs.append(prob.unsqueeze(1))
+            prob_new = prob.detach()
+            probs.append(prob.data.mean(0).squeeze(0).cpu().numpy())  # for debugging
+            sampled = torch.multinomial(prob_new, 1)
+            outputs.append(sampled)
+            if out_i < self.opt.seq_len - 1:
+                inputs = self.embedding(sampled.squeeze(1))
+        return (torch.cat(outputs, 1), torch.cat(all_logprobs, 1), torch.cat(all_probs, 1),
+                np.array(probs))
 
 
 if __name__ == '__main__':
@@ -275,9 +275,9 @@ if __name__ == '__main__':
         print('error: invalid task name:', opt.task)
         sys.exit(1)
 
-    actor = Actor(opt)  #.apply(util.weights_init)
     costsnet = CostsNet(opt)  #.apply(util.weights_init)
     critic = Critic(opt)  #.apply(util.weights_init)
+    actor = Actor(opt)  #.apply(util.weights_init)
     actor.cuda()
     costsnet.cuda()
     critic.cuda()
@@ -466,7 +466,6 @@ if __name__ == '__main__':
                 # this has to be done after critic optimization step since loss.backward() will
                 # accumulate gradients into value function approx as well.
                 actor.zero_grad()
-                # TODO optimize_all can be done to train actor using critic
                 loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
                 entropy = -(all_probs * all_logprobs).sum() / \
                           (opt.batch_size - int(print_generated))
