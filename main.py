@@ -116,14 +116,70 @@ class CostsNet(nn.Module):
             return costs_abs, onehot_actions
 
 
+class Critic(nn.Module):  # TODO
+    '''The imitation GAN costs network.'''
+
+    def __init__(self, opt):
+        super(Critic, self).__init__()
+        self.opt = opt
+        self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
+        self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.critic_hidden_size,
+                          num_layers=opt.critic_layers, dropout=opt.critic_dropout,
+                          batch_first=True)
+        self.cost = nn.Linear(opt.critic_hidden_size, opt.vocab_size)
+        self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
+        self.zero_state = torch.zeros([opt.critic_layers, opt.batch_size,
+                                       opt.critic_hidden_size]).cuda()
+        self.gradient_penalize = False
+
+    def forward(self, actions):
+        if self.gradient_penalize:
+            # actions is tuple of (real_batch, fake_batch)
+            real, fake = actions
+            padded_real = torch.cat([self.zero_input, real], 1)
+            padded_fake = torch.cat([self.zero_input, fake], 1)
+            onehot_real = torch.zeros(padded_real.size() + (self.opt.vocab_size,)).cuda()
+            onehot_fake = torch.zeros(padded_fake.size() + (self.opt.vocab_size,)).cuda()
+            padded_real.unsqueeze_(2)
+            padded_fake.unsqueeze_(2)
+            onehot_real.scatter_(2, padded_real, 1)
+            onehot_fake.scatter_(2, padded_fake, 1)
+            alpha = torch.rand(real.size(0)).unsqueeze(1).unsqueeze(2).expand_as(onehot_real).cuda()
+            onehot_actions = (alpha * onehot_real) + ((1 - alpha) * onehot_fake)
+            onehot_actions = Variable(onehot_actions, requires_grad=True)
+            inputs = torch.mm(onehot_actions.view(-1, self.opt.vocab_size), self.embedding.weight)
+            inputs = inputs.view(onehot_actions.size(0), -1, self.opt.emb_size)
+        else:
+            padded_actions = torch.cat([self.zero_input, actions], 1)
+            inputs = self.embedding(Variable(padded_actions))
+            onehot_actions = None
+        outputs, _ = self.rnn(inputs, Variable(self.zero_state))
+        outputs = outputs.contiguous()
+        flattened = outputs.view(-1, self.opt.critic_hidden_size)
+        flat_costs = self.cost(flattened)
+        costs = flat_costs.view(self.opt.batch_size, self.opt.seq_len + 1, self.opt.vocab_size)
+        costs = costs[:, :-1]  # account for the padding
+        costs_abs = torch.abs(costs)
+        if self.opt.smooth_zero > 1e-4:
+            select = (costs_abs >= self.opt.smooth_zero).float()
+            costs_abs = costs_abs - (self.opt.smooth_zero / 2)
+            costs_sq = (costs ** 2) / (self.opt.smooth_zero * 2)
+            return (select * costs_abs) + ((1.0 - select) * costs_sq), onehot_actions
+        else:
+            return costs_abs, onehot_actions
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--load_actor', type=str, default='', help='actor load file')
     parser.add_argument('--load_costsnet', type=str, default='', help='costsnet load file')
+    parser.add_argument('--load_critic', type=str, default='', help='critic load file')
     parser.add_argument('--save_actor', type=str, default='',
                         help='actor save file. saves as actor.model in logs by default')
     parser.add_argument('--save_costsnet', type=str, default='',
                         help='costsnet save file. saves as costsnet.model in logs by default')
+    parser.add_argument('--save_critic', type=str, default='',
+                        help='critic save file. saves as critic.model in logs by default')
     parser.add_argument('--save_every', type=int, default=500,
                         help='save every these many iters. -1 to disable')
     parser.add_argument('--save_overwrite', type=int, default=1, help='overwrite same save files')
@@ -135,12 +191,18 @@ if __name__ == '__main__':
     parser.add_argument('--actor_hidden_size', type=int, default=256, help='Actor RNN hidden size')
     parser.add_argument('--costsnet_hidden_size', type=int, default=256,
                         help='CostsNet RNN hidden size')
+    parser.add_argument('--critic_hidden_size', type=int, default=256,
+                        help='Critic RNN hidden size')
     parser.add_argument('--costsnet_layers', type=int, default=1)
     parser.add_argument('--costsnet_dropout', type=float, default=0.0)
+    parser.add_argument('--critic_layers', type=int, default=1)
+    parser.add_argument('--critic_dropout', type=float, default=0.0)
     parser.add_argument('--freeze_actor', type=int, default=-1,
                         help='freeze actor after these many steps')
     parser.add_argument('--freeze_costsnet', type=int, default=-1,
                         help='freeze costsnet after these many steps')
+    parser.add_argument('--freeze_critic', type=int, default=-1,
+                        help='freeze critic after these many steps')
     # 1e-3 without decay for text, >1e-3 for toys:
     parser.add_argument('--entropy_reg', type=float, default=1e-3,  # crucial.
                         help='policy entropy regularization')
@@ -172,13 +234,16 @@ if __name__ == '__main__':
     parser.add_argument('--gradient_penalty', type=float, default=10)
     parser.add_argument('--max_grad_norm', type=float, default=5.0,
                         help='norm for gradient clipping')
-    parser.add_argument('--costsnet_iters', type=int, default=25,  # 20 or 25 for larger tasks
-                        help='number of costsnet iters per turn')  # crucial
     parser.add_argument('--actor_iters', type=int, default=20,  # 15 or 20 for larger tasks
                         help='number of actor iters per turn')  # crucial
+    parser.add_argument('--costsnet_iters', type=int, default=25,  # 20 or 25 for larger tasks
+                        help='number of costsnet iters per turn')  # crucial
+    parser.add_argument('--critic_iters', type=int, default=25,  # TODO investigate
+                        help='number of critic iters per turn')  # crucial
     parser.add_argument('--burnin', type=int, default=25, help='number of burnin iterations')
     parser.add_argument('--burnin_actor_iters', type=int, default=1)
     parser.add_argument('--burnin_costsnet_iters', type=int, default=100)
+    parser.add_argument('--burnin_critic_iters', type=int, default=100)  # TODO
     parser.add_argument('--name', type=str, default='default')
     parser.add_argument('--task', type=str, default='lm', help='one of lm/longterm/words')
     parser.add_argument('--lm_data_dir', type=str, default='data/penn')
@@ -203,14 +268,18 @@ if __name__ == '__main__':
         opt.save_actor = opt.save + '/actor.model'
     if not opt.save_costsnet:
         opt.save_costsnet = opt.save + '/costsnet.model'
+    if not opt.save_critic:
+        opt.save_critic = opt.save + '/critic.model'
     train_log = open(opt.save + '/train.log', 'w')
     colors = cm.rainbow(np.linspace(0, 1, 3))
     plot_r = []
     plot_f = []
     plot_w = []
     plot_cgnorm = []
+    plot_ctgnorm = []
     plot_agnorm = []
 
+    # TODO replay for critic?
     opt.replay_size = opt.replay_actors * opt.batch_size * opt.costsnet_iters
     opt.replay_size_half = opt.replay_actors_half * opt.batch_size * opt.costsnet_iters
 
@@ -233,14 +302,17 @@ if __name__ == '__main__':
 
     actor = Actor(opt)  #.apply(util.weights_init)
     costsnet = CostsNet(opt)  #.apply(util.weights_init)
+    critic = Critic(opt)  #.apply(util.weights_init)
     actor.cuda()
     costsnet.cuda()
+    critic.cuda()
 
     kwargs = {'lr': opt.learning_rate}
     if opt.optimizer == 'Adam':
         kwargs['betas'] = (opt.beta1, opt.beta2)
     actor_optimizer = getattr(optim, opt.optimizer)(actor.parameters(), **kwargs)
     costsnet_optimizer = getattr(optim, opt.optimizer)(costsnet.parameters(), **kwargs)
+    critic_optimizer = getattr(optim, opt.optimizer)(critic.parameters(), **kwargs)
 
     if opt.load_actor:
         state_dict, optimizer_dict, actor_cur_iter = torch.load(opt.load_actor)
@@ -261,7 +333,14 @@ if __name__ == '__main__':
             buffer = util.ExponentialReplayMemory(opt.replay_size, opt.replay_size_half)
         else:
             buffer = util.ReplayMemory(opt.replay_size)
-    start_iter = min(actor_cur_iter, costsnet_cur_iter) + 1
+    if opt.load_actor:
+        state_dict, optimizer_dict, critic_cur_iter = torch.load(opt.load_critic)
+        critic.load_state_dict(state_dict)
+        critic_optimizer.load_state_dict(optimizer_dict)
+        print('Loaded critic from', opt.load_critic)
+    else:
+        critic_cur_iter = -1
+    start_iter = min(actor_cur_iter, costsnet_cur_iter, critic_cur_iter) + 1
 
     solved = 0
     solved_fail = 0
@@ -277,6 +356,7 @@ if __name__ == '__main__':
         # train costsnet
         train_costsnet = opt.freeze_costsnet < 0 or cur_iter < opt.freeze_costsnet
         if train_costsnet:
+            # TODO is this to be moved to critic?
             for param in costsnet.parameters():  # reset requires_grad
                 param.requires_grad = True  # they are set to False below in actor update
         if cur_iter < opt.burnin:
@@ -345,6 +425,10 @@ if __name__ == '__main__':
             err_r.append(E_real.data[0])
             err_f.append(E_generated.data[0])
 
+        # TODO train critic
+        critic_gnorms = []
+        train_critic = opt.freeze_costsnet < 0 or cur_iter < opt.freeze_costsnet
+
         # train actor
         train_actor = opt.freeze_actor < 0 or cur_iter < opt.freeze_actor
         for param in costsnet.parameters():
@@ -411,7 +495,7 @@ if __name__ == '__main__':
                 print(costs.data.cpu().numpy().sum(1), '\n')
                 if opt.use_advantage:
                     # FIXME incorrect.
-                    print('CostsNet advantages (real not included):')
+                    print('Critic advantages (real not included):')
                     print(-disadv.data.cpu().numpy(), '\n')
                 if opt.task == 'longterm':
                     print('Batch-averaged step-wise probs:')
@@ -424,6 +508,8 @@ if __name__ == '__main__':
                 extra.append('actor frozen')
             if not train_costsnet:
                 extra.append('costsnet frozen')
+            if not train_critic:
+                extra.append('critic frozen')
             extra = ', '.join(extra)
             print(cur_iter, ':\tWdist:', np.array(Wdists).mean(), '\terr R:',
                   np.array(err_r).mean(), '\terr F:', np.array(err_f).mean(), '\tentropy_reg:',
@@ -448,10 +534,12 @@ if __name__ == '__main__':
 
             plot_agnorm.append(np.array(actor_gnorms).mean())
             plot_cgnorm.append(np.array(costsnet_gnorms).mean())
+            plot_ctgnorm.append(np.array(critic_gnorms).mean())
             fig = plt.figure()
             plt.plot(x_array, np.array(plot_agnorm), c=colors[0])
             plt.plot(x_array, np.array(plot_cgnorm), c=colors[1])
-            plt.legend(['Actor grad norm', 'CostsNet grad norm'], loc=2)
+            plt.plot(x_array, np.array(plot_ctgnorm), c=colors[2])
+            plt.legend(['Actor grad norm', 'CostsNet grad norm', 'Critic grad norm'], loc=2)
             fig.savefig(opt.save + '/grads.png')
             plt.close()
 
@@ -477,9 +565,11 @@ if __name__ == '__main__':
             print('Saving model...')
             save_actor = opt.save_actor
             save_costsnet = opt.save_costsnet
+            save_critic = opt.save_critic
             if not opt.save_overwrite:
                 save_actor += ('.%d' % cur_iter)
                 save_costsnet += ('.%d' % cur_iter)
+                save_critic += ('.%d' % cur_iter)
             with open(save_actor, 'wb') as f:
                 states = [actor.state_dict(), actor_optimizer.state_dict(), cur_iter]
                 torch.save(states, f)
@@ -488,3 +578,7 @@ if __name__ == '__main__':
                 states = [costsnet.state_dict(), costsnet_optimizer.state_dict(), cur_iter, buffer]
                 torch.save(states, f)
                 print('Saved costsnet to', save_costsnet)
+            with open(save_critic, 'wb') as f:
+                states = [critic.state_dict(), critic_optimizer.state_dict(), cur_iter]
+                torch.save(states, f)
+                print('Saved critic to', save_critic)
