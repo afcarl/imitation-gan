@@ -38,7 +38,6 @@ class Actor(nn.Module):
         #self.embedding.weight = self.dist2.weight  # tie weights
         self.zero_input = torch.LongTensor(opt.batch_size).zero_().cuda()
         self.zero_state = torch.zeros([opt.batch_size, opt.actor_hidden_size]).cuda()
-        self.eps_sample = False  # do eps sampling
 
     def forward(self):
         outputs = []
@@ -56,13 +55,6 @@ class Actor(nn.Module):
             all_probs.append(prob.unsqueeze(1))
             prob_new = prob.detach()
             probs.append(prob.data.mean(0).squeeze(0).cpu().numpy())  # for debugging
-            # eps sampling
-            if self.eps_sample:
-                prob_new = prob_new.clone()
-                draw_randomly = self.opt.eps >= torch.rand([self.opt.batch_size])
-                draw_randomly = draw_randomly.byte().unsqueeze(1).cuda().expand_as(prob_new)
-                # set uniform distribution with opt.eps probability
-                prob_new[draw_randomly] = 1 / self.opt.vocab_size
             sampled = torch.multinomial(prob_new, 1)
             outputs.append(sampled)
             if out_i < self.opt.seq_len - 1:
@@ -153,10 +145,6 @@ if __name__ == '__main__':
                         help='Costs RNN hidden size')
     parser.add_argument('--costs_layers', type=int, default=1)
     parser.add_argument('--costs_dropout', type=float, default=0.0)
-    parser.add_argument('--eps', type=float, default=0.0,
-                        help='epsilon for eps sampling. results in biased policy gradient')
-    parser.add_argument('--eps_for_costs', type=int, default=0,
-                        help='enable eps sampling of actor during costs training')
     parser.add_argument('--freeze_actor', type=int, default=-1,
                         help='freeze actor after these many steps')
     parser.add_argument('--freeze_costs', type=int, default=-1,
@@ -298,7 +286,6 @@ if __name__ == '__main__':
         if solved >= opt.solved_threshold:
             print('%d: Task solved, exiting.' % cur_iter)
             break
-        actor.eps_sample = bool(opt.eps_for_costs) and opt.eps > 1e-8
 
         # train costs
         train_costs = opt.freeze_costs < 0 or cur_iter < opt.freeze_costs
@@ -380,12 +367,9 @@ if __name__ == '__main__':
         else:
             actor_iters = opt.actor_iters
         if cur_iter % opt.gen_every == 0:
-            # disable eps_sample since we intend to visualize a (noiseless) generation.
             print_generated = True
-            actor.eps_sample = False
         else:
             print_generated = False
-            actor.eps_sample = opt.eps > 1e-8
         entropy_reg = max(opt.entropy_reg * (opt.entropy_decay ** cur_iter), opt.entropy_reg_min)
 
         actor_gnorms = []
@@ -452,7 +436,6 @@ if __name__ == '__main__':
                     print('Batch-averaged step-wise probs:')
                     print(avgprobs, '\n')
                 print_generated = False
-                actor.eps_sample = opt.eps > 1e-8
         costs.gamma = min(costs.gamma + opt.gamma_inc, 1.0)
 
         if cur_iter % opt.print_every == 0:
