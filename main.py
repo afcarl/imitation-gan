@@ -187,8 +187,8 @@ if __name__ == '__main__':
                         help='minimum policy entropy regularization')
     parser.add_argument('--costsnet_entropy_reg', type=float, default=0.0,  # <= 1e-3
                         help='costsnet entropy regularization')
-    parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')  # TODO use
-    parser.add_argument('--reward_steps', type=int, default=1,  # TODO use
+    parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
+    parser.add_argument('--reward_steps', type=int, default=1,
                         help='Number of rewards before critic value for Q estimation')
     parser.add_argument('--smooth_zero', type=float, default=2e-3,  # 1e-2 for larger tasks
                         help='s, use c^2/2s instead of c-(s/2) when abs costsnet score c<s')
@@ -331,7 +331,6 @@ if __name__ == '__main__':
         # train costsnet
         train_costsnet = opt.freeze_costsnet < 0 or cur_iter < opt.freeze_costsnet
         if train_costsnet:
-            # TODO is this to be moved to critic?
             for param in costsnet.parameters():  # reset requires_grad
                 param.requires_grad = True  # they are set to False below in actor update
         if cur_iter < opt.burnin:
@@ -453,21 +452,21 @@ if __name__ == '__main__':
             else:
                 cur_values = all_values
             all_returns = all_returns + (cur_values * (opt.gamma ** opt.reward_steps))
-            all_disadv = all_returns - all_values  # TODO critic minimizes squared this
+            all_disadv = all_returns - all_values  # TODO XXX critic minimizes squared this
             if print_generated:
                 disadv = all_disadv[:-1]
             else:
                 disadv = all_disadv
             if train_critic:
                 loss = (disadv ** 2).sum() / (opt.batch_size - int(print_generated))
-                loss.backward()  # TODO have this affect only critic
+                loss.backward()  # TODO XXX have this affect only critic
             if train_actor:
                 # TODO optimize_all can be done to train actor using critic
                 loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
                 entropy = -(all_probs * all_logprobs).sum() / \
                           (opt.batch_size - int(print_generated))
                 loss -= entropy_reg * entropy
-                loss.backward()  # TODO have this affect only actor
+                loss.backward()  # TODO XXX have this affect only actor
             actor_gnorms.append(util.gradient_norm(actor.parameters()))
             critic_gnorms.append(util.gradient_norm(critic.parameters()))
             if train_critic:
