@@ -470,6 +470,7 @@ if __name__ == '__main__':
 #            else:
 #                disadv = costs
 #            disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
+            # TODO optimize_all can be done to train actor using critic
             # FIXME following is Monte Carlo
             disadv = costs - costs.cumsum(1) + costs.sum(1).expand_as(costs)
             if train_actor:
