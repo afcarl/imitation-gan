@@ -400,13 +400,9 @@ if __name__ == '__main__':
             err_r.append(E_real.data[0])
             err_f.append(E_generated.data[0])
 
-        # TODO train critic
-        critic_gnorms = []
-        # TODO merge with train_actor
-        train_critic = opt.freeze_costsnet < 0 or cur_iter < opt.freeze_costsnet
-
         # train actor
         train_actor = opt.freeze_actor < 0 or cur_iter < opt.freeze_actor
+        train_critic = opt.freeze_critic < 0 or cur_iter < opt.freeze_critic
         for param in costsnet.parameters():
             param.requires_grad = False  # to avoid computation
         if not train_actor or cur_iter < opt.burnin:
@@ -420,9 +416,12 @@ if __name__ == '__main__':
         entropy_reg = max(opt.entropy_reg * (opt.entropy_decay ** cur_iter), opt.entropy_reg_min)
 
         actor_gnorms = []
+        critic_gnorms = []
         for actor_i in xrange(actor_iters):
             if train_actor:
-                actor.zero_grad()  # TODO train critic
+                actor.zero_grad()
+            if train_critic:
+                critic.zero_grad()
             all_generated, all_logprobs, all_probs, avgprobs = actor()
             if print_generated:  # last sample is real, for debugging. do not train on it!
                 all_generated = torch.cat([all_generated[:-1],
@@ -435,58 +434,62 @@ if __name__ == '__main__':
             logprobs = all_logprobs.gather(2, generated.unsqueeze(2)).squeeze(2)
             all_costs, _ = costsnet(all_generated.data)
             all_values = critic(all_generated.data)
-            if print_generated:
-                costs = all_costs[:-1]
-                values = all_values[:-1]
-            else:
-                costs = all_costs
-                values = all_values
-            costs = costs.gather(2, generated.unsqueeze(2)).squeeze(2)
-            returns = Variable(torch.zeros(costs.size()).cuda())
+            all_costs = all_costs.gather(2, generated.unsqueeze(2)).squeeze(2)
+            all_returns = Variable(torch.zeros(all_costs.size()).cuda())
             for ret_i in xrange(opt.reward_steps):
                 if ret_i > 0:
-                    cur_costs = torch.cat([costs[:, ret_i:],
-                                           Variable(torch.zeros([costs.size(0), ret_i]).cuda())], 1)
+                    cur_costs = torch.cat([all_costs[:, ret_i:],
+                                           Variable(torch.zeros([all_costs.size(0),
+                                                                 ret_i]).cuda())], 1)
                 else:
-                    cur_costs = costs
+                    cur_costs = all_costs
                 # FIXME problem: episode ends suddenly, so the returns at later timesteps are much
                 #       lower! can we concat something other than zeros?
-                returns = returns + (cur_costs * (opt.gamma ** ret_i))
+                all_returns = all_returns + (cur_costs * (opt.gamma ** ret_i))
             if opt.reward_steps > 0:
-                cur_values = torch.cat([values[:, opt.reward_steps:],
-                                        Variable(torch.zeros([values.size(0),
+                cur_values = torch.cat([all_values[:, opt.reward_steps:],
+                                        Variable(torch.zeros([all_values.size(0),
                                                               opt.reward_steps]).cuda())], 1)
             else:
-                cur_values = values
-            returns = returns + (cur_values * (opt.gamma ** opt.reward_steps))
-            disadv = returns - values  # TODO critic minimizes squared this
-
-            # TODO optimize_all can be done to train actor using critic
+                cur_values = all_values
+            all_returns = all_returns + (cur_values * (opt.gamma ** opt.reward_steps))
+            all_disadv = all_returns - all_values  # TODO critic minimizes squared this
+            if print_generated:
+                disadv = all_disadv[:-1]
+            else:
+                disadv = all_disadv
+            if train_critic:
+                loss = (disadv ** 2).sum() / (opt.batch_size - int(print_generated))
+                loss.backward()  # TODO have this affect only critic
             if train_actor:
+                # TODO optimize_all can be done to train actor using critic
                 loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
-            if train_actor:
                 entropy = -(all_probs * all_logprobs).sum() / \
                           (opt.batch_size - int(print_generated))
                 loss -= entropy_reg * entropy
-                loss.backward()
+                loss.backward()  # TODO have this affect only actor
             actor_gnorms.append(util.gradient_norm(actor.parameters()))
+            critic_gnorms.append(util.gradient_norm(critic.parameters()))
+            if train_critic:
+                if opt.max_grad_norm > 0:
+                    nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
+                critic_optimizer.step()
             if train_actor:
                 if opt.max_grad_norm > 0:
                     nn.utils.clip_grad_norm(actor.parameters(), opt.max_grad_norm)
                 actor_optimizer.step()
             if print_generated:
                 # print generated only in the first actor iteration
-                costs = all_costs.gather(2, all_generated.unsqueeze(2)).squeeze(2)
                 print('Generated (last row is real):')
                 task.display(all_generated.data.cpu().numpy())
                 print()
                 print('CostsNet costs (last row is real):')
-                print(costs.data.cpu().numpy(), '\n')
+                print(all_costs.data.cpu().numpy(), '\n')
                 print('CostsNet cost sums (last element is real):')
-                print(costs.data.cpu().numpy().sum(1), '\n')
-                # TODO log all_values
-                # FIXME incorrect.
-                print('Critic advantages (real not included):')
+                print(all_costs.data.cpu().numpy().sum(1), '\n')
+                print('Critic values (last row is real):')
+                print(all_values.data.cpu().numpy(), '\n')
+                print('Critic advantages (last row is real):')
                 print(-disadv.data.cpu().numpy(), '\n')
                 if opt.task == 'longterm':
                     print('Batch-averaged step-wise probs:')
