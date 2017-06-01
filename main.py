@@ -378,13 +378,16 @@ if __name__ == '__main__':
                 costs = all_costs[:-1]
             else:
                 costs = all_costs
-            # TODO do all this with critic values
-            if opt.use_advantage:
-                baseline = (costs * all_probs).detach().sum(2).expand_as(costs)
-                disadv = costs - baseline
-            else:
-                disadv = costs
-            disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
+            costs = costs.gather(2, generated.unsqueeze(2)).squeeze(2)
+            # TODO advantage can only be computed with critic implemented
+#            if opt.use_advantage:
+#                baseline = (costs * all_probs).detach().sum(2).expand_as(costs)
+#                disadv = costs - baseline
+#            else:
+#                disadv = costs
+#            disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
+            # FIXME following is Monte Carlo
+            disadv = costs - costs.cumsum(1) + costs.sum(1).expand_as(costs)
             if train_actor:
                 loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
             if train_actor:
@@ -398,7 +401,6 @@ if __name__ == '__main__':
                     nn.utils.clip_grad_norm(actor.parameters(), opt.max_grad_norm)
                 actor_optimizer.step()
             if print_generated:
-                costs = all_costs.gather(2, all_generated.unsqueeze(2)).squeeze(2)
                 # print generated only in the first actor iteration
                 print('Generated (last row is real):')
                 task.display(all_generated.data.cpu().numpy())
