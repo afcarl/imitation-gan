@@ -363,7 +363,8 @@ if __name__ == '__main__':
 
             critic_gnorms.append(util.gradient_norm(critic.parameters()))
             if train_critic:
-                nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
+                if opt.max_grad_norm > 0:
+                    nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
                 critic_optimizer.step()
             Wdist = (E_generated - E_real).data[0]
             Wdists.append(Wdist)
@@ -431,7 +432,8 @@ if __name__ == '__main__':
                 loss.backward()
             actor_gnorms.append(util.gradient_norm(actor.parameters()))
             if train_actor:
-                nn.utils.clip_grad_norm(actor.parameters(), opt.max_grad_norm)
+                if opt.max_grad_norm > 0:
+                    nn.utils.clip_grad_norm(actor.parameters(), opt.max_grad_norm)
                 actor_optimizer.step()
             if print_generated:
                 costs = all_costs.gather(2, all_generated.unsqueeze(2)).squeeze(2)
