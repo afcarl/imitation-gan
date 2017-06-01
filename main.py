@@ -452,27 +452,29 @@ if __name__ == '__main__':
             else:
                 cur_values = all_values
             all_returns = all_returns + (cur_values * (opt.gamma ** opt.reward_steps))
-            all_disadv = all_returns - all_values  # TODO XXX critic minimizes squared this
+            all_disadv = all_returns - all_values
             if print_generated:
                 disadv = all_disadv[:-1]
             else:
                 disadv = all_disadv
             if train_critic:
                 loss = (disadv ** 2).sum() / (opt.batch_size - int(print_generated))
-                loss.backward()  # TODO XXX have this affect only critic
-            if train_actor:
-                # TODO optimize_all can be done to train actor using critic
-                loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
-                entropy = -(all_probs * all_logprobs).sum() / \
-                          (opt.batch_size - int(print_generated))
-                loss -= entropy_reg * entropy
-                loss.backward()  # TODO XXX have this affect only actor
-            actor_gnorms.append(util.gradient_norm(actor.parameters()))
+                loss.backward()
             critic_gnorms.append(util.gradient_norm(critic.parameters()))
             if train_critic:
                 if opt.max_grad_norm > 0:
                     nn.utils.clip_grad_norm(critic.parameters(), opt.max_grad_norm)
                 critic_optimizer.step()
+            if train_actor:
+                # this has to be done after critic optimization step since loss.backward() will
+                # accumulate gradients into value function approx as well.
+                # TODO optimize_all can be done to train actor using critic
+                loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
+                entropy = -(all_probs * all_logprobs).sum() / \
+                          (opt.batch_size - int(print_generated))
+                loss -= entropy_reg * entropy
+                loss.backward()
+            actor_gnorms.append(util.gradient_norm(actor.parameters()))
             if train_actor:
                 if opt.max_grad_norm > 0:
                     nn.utils.clip_grad_norm(actor.parameters(), opt.max_grad_norm)
