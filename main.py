@@ -141,7 +141,7 @@ class Critic(nn.Module):
         flat_value = self.value(flattened)
         value = flat_value.view(self.opt.batch_size, self.opt.seq_len + 1)
         # account for the padding
-        return value[:, 1:]
+        return value[:, :-1]
 
 
 if __name__ == '__main__':
@@ -192,7 +192,6 @@ if __name__ == '__main__':
                         help='Number of rewards before critic value for Q estimation')
     parser.add_argument('--smooth_zero', type=float, default=2e-3,  # 1e-2 for larger tasks
                         help='s, use c^2/2s instead of c-(s/2) when abs costsnet score c<s')
-    parser.add_argument('--use_advantage', type=int, default=1)
     parser.add_argument('--exp_replay_buffer', type=int, default=0,
                         help='use a replay buffer with an exponential distribution')
     parser.add_argument('--real_multiplier', type=float, default=7.0,  # crucial
@@ -403,6 +402,7 @@ if __name__ == '__main__':
 
         # TODO train critic
         critic_gnorms = []
+        # TODO merge with train_actor
         train_critic = opt.freeze_costsnet < 0 or cur_iter < opt.freeze_costsnet
 
         # train actor
@@ -422,7 +422,7 @@ if __name__ == '__main__':
         actor_gnorms = []
         for actor_i in xrange(actor_iters):
             if train_actor:
-                actor.zero_grad()
+                actor.zero_grad()  # TODO train critic
             all_generated, all_logprobs, all_probs, avgprobs = actor()
             if print_generated:  # last sample is real, for debugging. do not train on it!
                 all_generated = torch.cat([all_generated[:-1],
@@ -434,21 +434,34 @@ if __name__ == '__main__':
                 generated = all_generated
             logprobs = all_logprobs.gather(2, generated.unsqueeze(2)).squeeze(2)
             all_costs, _ = costsnet(all_generated.data)
+            all_values = critic(all_generated.data)
             if print_generated:
                 costs = all_costs[:-1]
+                values = all_values[:-1]
             else:
                 costs = all_costs
+                values = all_values
             costs = costs.gather(2, generated.unsqueeze(2)).squeeze(2)
-            # TODO advantage can only be computed with critic implemented
-#            if opt.use_advantage:
-#                baseline = (costs * all_probs).detach().sum(2).expand_as(costs)
-#                disadv = costs - baseline
-#            else:
-#                disadv = costs
-#            disadv = disadv.gather(2, generated.unsqueeze(2)).squeeze(2)
+            returns = Variable(torch.zeros(costs.size()).cuda())
+            for ret_i in xrange(opt.reward_steps):
+                if ret_i > 0:
+                    cur_costs = torch.cat([costs[:, ret_i:],
+                                           Variable(torch.zeros([costs.size(0), ret_i]).cuda())], 1)
+                else:
+                    cur_costs = costs
+                # FIXME problem: episode ends suddenly, so the returns at later timesteps are much
+                #       lower! can we concat something other than zeros?
+                returns = returns + (cur_costs * (opt.gamma ** ret_i))
+            if opt.reward_steps > 0:
+                cur_values = torch.cat([values[:, opt.reward_steps:],
+                                        Variable(torch.zeros([values.size(0),
+                                                              opt.reward_steps]).cuda())], 1)
+            else:
+                cur_values = values
+            returns = returns + (cur_values * (opt.gamma ** opt.reward_steps))
+            disadv = returns - values  # TODO critic minimizes squared this
+
             # TODO optimize_all can be done to train actor using critic
-            # FIXME following is Monte Carlo
-            disadv = costs - costs.cumsum(1) + costs.sum(1).expand_as(costs)
             if train_actor:
                 loss = (disadv * logprobs).sum() / (opt.batch_size - int(print_generated))
             if train_actor:
@@ -463,6 +476,7 @@ if __name__ == '__main__':
                 actor_optimizer.step()
             if print_generated:
                 # print generated only in the first actor iteration
+                costs = all_costs.gather(2, all_generated.unsqueeze(2)).squeeze(2)
                 print('Generated (last row is real):')
                 task.display(all_generated.data.cpu().numpy())
                 print()
@@ -470,10 +484,10 @@ if __name__ == '__main__':
                 print(costs.data.cpu().numpy(), '\n')
                 print('CostsNet cost sums (last element is real):')
                 print(costs.data.cpu().numpy().sum(1), '\n')
-                if opt.use_advantage:
-                    # FIXME incorrect.
-                    print('Critic advantages (real not included):')
-                    print(-disadv.data.cpu().numpy(), '\n')
+                # TODO log all_values
+                # FIXME incorrect.
+                print('Critic advantages (real not included):')
+                print(-disadv.data.cpu().numpy(), '\n')
                 if opt.task == 'longterm':
                     print('Batch-averaged step-wise probs:')
                     print(avgprobs, '\n')
