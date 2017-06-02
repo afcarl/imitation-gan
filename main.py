@@ -187,6 +187,10 @@ if __name__ == '__main__':
                         help='minimum policy entropy regularization')
     parser.add_argument('--disc_entropy_reg', type=float, default=0.0,  # <= 1e-3
                         help='disc entropy regularization')
+    # TODO add gamma_inc. gamma=0 is useful to get immediate reward signal in the beginning, where
+    #      the policy is not well-trained. once the policy is trained to a certain extent, we can
+    #      increase gamma to consider future rewards in the horizon as well. doing so is like
+    #      averaging the costs across timesteps to get a less noisy cost for the current timestep.
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--reward_steps', type=int, default=1,
                         help='Number of rewards before critic value for Q estimation')
