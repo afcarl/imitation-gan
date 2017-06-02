@@ -488,7 +488,7 @@ if __name__ == '__main__':
                 print('Critic values (last row is real):')
                 print(all_values.data.cpu().numpy(), '\n')
                 print('Critic advantages (last row is real):')
-                print(-disadv.data.cpu().numpy(), '\n')
+                print(-all_disadv.data.cpu().numpy(), '\n')
                 if opt.task == 'longterm':
                     print('Batch-averaged step-wise probs:')
                     print(avgprobs, '\n')
