@@ -24,20 +24,20 @@ import torch.optim as optim
 import util
 
 
-class CostsNet(nn.Module):
+class Discriminator(nn.Module):
     '''The imitation GAN costs network (discriminator).'''
 
     def __init__(self, opt):
-        super(CostsNet, self).__init__()
+        super(Discriminator, self).__init__()
         self.opt = opt
         self.embedding = nn.Embedding(opt.vocab_size, opt.emb_size)
-        self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.costsnet_hidden_size,
-                          num_layers=opt.costsnet_layers, dropout=opt.costsnet_dropout,
+        self.rnn = nn.GRU(input_size=opt.emb_size, hidden_size=opt.disc_hidden_size,
+                          num_layers=opt.disc_layers, dropout=opt.disc_dropout,
                           batch_first=True)
-        self.cost = nn.Linear(opt.costsnet_hidden_size, opt.vocab_size)
+        self.cost = nn.Linear(opt.disc_hidden_size, opt.vocab_size)
         self.zero_input = torch.LongTensor(opt.batch_size, 1).zero_().cuda()
-        self.zero_state = torch.zeros([opt.costsnet_layers, opt.batch_size,
-                                       opt.costsnet_hidden_size]).cuda()
+        self.zero_state = torch.zeros([opt.disc_layers, opt.batch_size,
+                                       opt.disc_hidden_size]).cuda()
         self.gradient_penalize = False
 
     def forward(self, actions):
@@ -63,7 +63,7 @@ class CostsNet(nn.Module):
             onehot_actions = None
         outputs, _ = self.rnn(inputs, Variable(self.zero_state))
         outputs = outputs.contiguous()
-        flattened = outputs.view(-1, self.opt.costsnet_hidden_size)
+        flattened = outputs.view(-1, self.opt.disc_hidden_size)
         flat_costs = self.cost(flattened)
         costs = flat_costs.view(self.opt.batch_size, self.opt.seq_len + 1, self.opt.vocab_size)
         costs = costs[:, :-1]  # account for the padding
@@ -147,12 +147,12 @@ class Actor(nn.Module):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--load_actor', type=str, default='', help='actor load file')
-    parser.add_argument('--load_costsnet', type=str, default='', help='costsnet load file')
+    parser.add_argument('--load_disc', type=str, default='', help='disc load file')
     parser.add_argument('--load_critic', type=str, default='', help='critic load file')
     parser.add_argument('--save_actor', type=str, default='',
                         help='actor save file. saves as actor.model in logs by default')
-    parser.add_argument('--save_costsnet', type=str, default='',
-                        help='costsnet save file. saves as costsnet.model in logs by default')
+    parser.add_argument('--save_disc', type=str, default='',
+                        help='disc save file. saves as disc.model in logs by default')
     parser.add_argument('--save_critic', type=str, default='',
                         help='critic save file. saves as critic.model in logs by default')
     parser.add_argument('--save_every', type=int, default=500,
@@ -164,18 +164,18 @@ if __name__ == '__main__':
     parser.add_argument('--vocab_size', type=int, default=60, help='vocab size for data')
     parser.add_argument('--emb_size', type=int, default=32, help='embedding size')
     parser.add_argument('--actor_hidden_size', type=int, default=256, help='Actor RNN hidden size')
-    parser.add_argument('--costsnet_hidden_size', type=int, default=256,
-                        help='CostsNet RNN hidden size')
+    parser.add_argument('--disc_hidden_size', type=int, default=256,
+                        help='Discriminator RNN hidden size')
     parser.add_argument('--critic_hidden_size', type=int, default=256,
                         help='Critic RNN hidden size')
-    parser.add_argument('--costsnet_layers', type=int, default=1)
-    parser.add_argument('--costsnet_dropout', type=float, default=0.0)
+    parser.add_argument('--disc_layers', type=int, default=1)
+    parser.add_argument('--disc_dropout', type=float, default=0.0)
     parser.add_argument('--critic_layers', type=int, default=1)
     parser.add_argument('--critic_dropout', type=float, default=0.0)
     parser.add_argument('--freeze_actor', type=int, default=-1,
                         help='freeze actor after these many steps')
-    parser.add_argument('--freeze_costsnet', type=int, default=-1,
-                        help='freeze costsnet after these many steps')
+    parser.add_argument('--freeze_disc', type=int, default=-1,
+                        help='freeze disc after these many steps')
     parser.add_argument('--freeze_critic', type=int, default=-1,
                         help='freeze critic after these many steps')
     # 1e-3 without decay for text, >1e-3 for toys:
@@ -185,17 +185,17 @@ if __name__ == '__main__':
                         help='policy entropy regularization weight decay per turn')
     parser.add_argument('--entropy_reg_min', type=float, default=5e-4,
                         help='minimum policy entropy regularization')
-    parser.add_argument('--costsnet_entropy_reg', type=float, default=0.0,  # <= 1e-3
-                        help='costsnet entropy regularization')
+    parser.add_argument('--disc_entropy_reg', type=float, default=0.0,  # <= 1e-3
+                        help='disc entropy regularization')
     parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
     parser.add_argument('--reward_steps', type=int, default=1,
                         help='Number of rewards before critic value for Q estimation')
     parser.add_argument('--smooth_zero', type=float, default=2e-3,  # 1e-2 for larger tasks
-                        help='s, use c^2/2s instead of c-(s/2) when abs costsnet score c<s')
+                        help='s, use c^2/2s instead of c-(s/2) when abs disc score c<s')
     parser.add_argument('--exp_replay_buffer', type=int, default=0,
                         help='use a replay buffer with an exponential distribution')
     parser.add_argument('--real_multiplier', type=float, default=7.0,  # crucial
-                        help='weight for real samples as compared to fake for costsnet learning')
+                        help='weight for real samples as compared to fake for disc learning')
     parser.add_argument('--replay_actors', type=int, default=10,  # higher with exp buffer
                         help='number of actors for experience replay')
     parser.add_argument('--replay_actors_half', type=int, default=3,
@@ -214,11 +214,11 @@ if __name__ == '__main__':
                         help='norm for gradient clipping')
     parser.add_argument('--actor_iters', type=int, default=20,  # 15 or 20 for larger tasks
                         help='number of actor iters per turn')  # crucial
-    parser.add_argument('--costsnet_iters', type=int, default=25,  # 20 or 25 for larger tasks
-                        help='number of costsnet iters per turn')  # crucial
+    parser.add_argument('--disc_iters', type=int, default=25,  # 20 or 25 for larger tasks
+                        help='number of disc iters per turn')  # crucial
     parser.add_argument('--burnin', type=int, default=25, help='number of burnin iterations')
     parser.add_argument('--burnin_actor_iters', type=int, default=1)
-    parser.add_argument('--burnin_costsnet_iters', type=int, default=100)
+    parser.add_argument('--burnin_disc_iters', type=int, default=100)
     parser.add_argument('--name', type=str, default='default')
     parser.add_argument('--task', type=str, default='lm', help='one of lm/longterm/words')
     parser.add_argument('--lm_data_dir', type=str, default='data/penn')
@@ -241,8 +241,8 @@ if __name__ == '__main__':
         os.makedirs(opt.save)
     if not opt.save_actor:
         opt.save_actor = opt.save + '/actor.model'
-    if not opt.save_costsnet:
-        opt.save_costsnet = opt.save + '/costsnet.model'
+    if not opt.save_disc:
+        opt.save_disc = opt.save + '/disc.model'
     if not opt.save_critic:
         opt.save_critic = opt.save + '/critic.model'
     train_log = open(opt.save + '/train.log', 'w')
@@ -255,8 +255,8 @@ if __name__ == '__main__':
     plot_agnorm = []
 
     # TODO replay for critic?
-    opt.replay_size = opt.replay_actors * opt.batch_size * opt.costsnet_iters
-    opt.replay_size_half = opt.replay_actors_half * opt.batch_size * opt.costsnet_iters
+    opt.replay_size = opt.replay_actors * opt.batch_size * opt.disc_iters
+    opt.replay_size_half = opt.replay_actors_half * opt.batch_size * opt.disc_iters
 
     cudnn.enabled = False
     np.set_printoptions(precision=4, threshold=10000, linewidth=200, suppress=True)
@@ -275,18 +275,18 @@ if __name__ == '__main__':
         print('error: invalid task name:', opt.task)
         sys.exit(1)
 
-    costsnet = CostsNet(opt)  #.apply(util.weights_init)
+    disc = Discriminator(opt)  #.apply(util.weights_init)
     critic = Critic(opt)  #.apply(util.weights_init)
     actor = Actor(opt)  #.apply(util.weights_init)
     actor.cuda()
-    costsnet.cuda()
+    disc.cuda()
     critic.cuda()
 
     kwargs = {'lr': opt.learning_rate}
     if opt.optimizer == 'Adam':
         kwargs['betas'] = (opt.beta1, opt.beta2)
     actor_optimizer = getattr(optim, opt.optimizer)(actor.parameters(), **kwargs)
-    costsnet_optimizer = getattr(optim, opt.optimizer)(costsnet.parameters(), **kwargs)
+    disc_optimizer = getattr(optim, opt.optimizer)(disc.parameters(), **kwargs)
     critic_optimizer = getattr(optim, opt.optimizer)(critic.parameters(), **kwargs)
 
     if opt.load_actor:
@@ -296,13 +296,13 @@ if __name__ == '__main__':
         print('Loaded actor from', opt.load_actor)
     else:
         actor_cur_iter = -1
-    if opt.load_costsnet:
-        state_dict, optimizer_dict, costsnet_cur_iter, buffer = torch.load(opt.load_costsnet)
-        costsnet.load_state_dict(state_dict)
-        costsnet_optimizer.load_state_dict(optimizer_dict)
-        print('Loaded costsnet from', opt.load_costsnet)
+    if opt.load_disc:
+        state_dict, optimizer_dict, disc_cur_iter, buffer = torch.load(opt.load_disc)
+        disc.load_state_dict(state_dict)
+        disc_optimizer.load_state_dict(optimizer_dict)
+        print('Loaded disc from', opt.load_disc)
     else:
-        costsnet_cur_iter = -1
+        disc_cur_iter = -1
         assert opt.replay_size >= opt.batch_size
         if opt.exp_replay_buffer:
             buffer = util.ExponentialReplayMemory(opt.replay_size, opt.replay_size_half)
@@ -315,7 +315,7 @@ if __name__ == '__main__':
         print('Loaded critic from', opt.load_critic)
     else:
         critic_cur_iter = -1
-    start_iter = min(actor_cur_iter, costsnet_cur_iter, critic_cur_iter) + 1
+    start_iter = min(actor_cur_iter, disc_cur_iter, critic_cur_iter) + 1
 
     solved = 0
     solved_fail = 0
@@ -328,57 +328,57 @@ if __name__ == '__main__':
             print('%d: Task solved, exiting.' % cur_iter)
             break
 
-        # train costsnet
-        train_costsnet = opt.freeze_costsnet < 0 or cur_iter < opt.freeze_costsnet
-        if train_costsnet:
-            for param in costsnet.parameters():  # reset requires_grad
+        # train disc
+        train_disc = opt.freeze_disc < 0 or cur_iter < opt.freeze_disc
+        if train_disc:
+            for param in disc.parameters():  # reset requires_grad
                 param.requires_grad = True  # they are set to False below in actor update
         if cur_iter < opt.burnin:
-            costsnet_iters = opt.burnin_costsnet_iters
+            disc_iters = opt.burnin_disc_iters
         else:
-            costsnet_iters = opt.costsnet_iters
+            disc_iters = opt.disc_iters
         Wdists = []
         err_r = []
         err_f = []
-        costsnet_gnorms = []
-        for costsnet_i in xrange(costsnet_iters):
-            if train_costsnet:
-                costsnet.zero_grad()
+        disc_gnorms = []
+        for disc_i in xrange(disc_iters):
+            if train_disc:
+                disc.zero_grad()
 
             generated, _, _, _ = actor()
             buffer.push(generated.data.cpu().numpy())
             generated = buffer.sample(opt.batch_size)
             generated = torch.from_numpy(generated).cuda()
-            costs, _ = costsnet(generated)
+            costs, _ = disc(generated)
             norm_costs = costs / costs.sum(2).expand_as(costs)
-            if train_costsnet and opt.costsnet_entropy_reg > 0:
+            if train_disc and opt.disc_entropy_reg > 0:
                 entropy = -((1e-6 + norm_costs) * torch.log(1e-6 + norm_costs)).sum() / \
                           opt.batch_size
             else:
                 entropy = 0.0
             costs = costs.gather(2, Variable(generated.unsqueeze(2))).squeeze(2)
             E_generated = costs.sum() / opt.batch_size
-            if train_costsnet:
-                loss = -E_generated - (opt.costsnet_entropy_reg * entropy)
+            if train_disc:
+                loss = -E_generated - (opt.disc_entropy_reg * entropy)
                 loss.backward()
 
             real = torch.from_numpy(task.get_data(opt.batch_size)).cuda()
-            costs, _ = costsnet(real)
+            costs, _ = disc(real)
             norm_costs = costs / costs.sum(2).expand_as(costs)
-            if train_costsnet and opt.costsnet_entropy_reg > 0:
+            if train_disc and opt.disc_entropy_reg > 0:
                 entropy = -((1e-6 + norm_costs) * torch.log(1e-6 + norm_costs)).sum() / \
                           opt.batch_size
             else:
                 entropy = 0.0
             costs = costs.gather(2, Variable(real.unsqueeze(2))).squeeze(2)
             E_real = costs.sum() / opt.batch_size
-            if train_costsnet:
-                loss = (opt.real_multiplier * E_real) - (opt.costsnet_entropy_reg * entropy)
+            if train_disc:
+                loss = (opt.real_multiplier * E_real) - (opt.disc_entropy_reg * entropy)
                 loss.backward()
 
-            if train_costsnet and opt.gradient_penalty > 0:
-                costsnet.gradient_penalize = True
-                costs, inputs = costsnet((real, generated))
+            if train_disc and opt.gradient_penalty > 0:
+                disc.gradient_penalize = True
+                costs, inputs = disc((real, generated))
                 costs = costs * inputs[:, 1:]
                 loss = ((opt.real_multiplier + 1) / 2) * costs.sum()
                 inputs_grad, = autograd.grad([loss], [inputs], create_graph=True)
@@ -387,13 +387,13 @@ if __name__ == '__main__':
                 norm_errors = norm_sq - 2 * torch.sqrt(norm_sq) + 1
                 loss = opt.gradient_penalty * norm_errors.sum() / opt.batch_size
                 loss.backward()
-                costsnet.gradient_penalize = False
+                disc.gradient_penalize = False
 
-            costsnet_gnorms.append(util.gradient_norm(costsnet.parameters()))
-            if train_costsnet:
+            disc_gnorms.append(util.gradient_norm(disc.parameters()))
+            if train_disc:
                 if opt.max_grad_norm > 0:
-                    nn.utils.clip_grad_norm(costsnet.parameters(), opt.max_grad_norm)
-                costsnet_optimizer.step()
+                    nn.utils.clip_grad_norm(disc.parameters(), opt.max_grad_norm)
+                disc_optimizer.step()
             Wdist = (E_generated - E_real).data[0]
             Wdists.append(Wdist)
             err_r.append(E_real.data[0])
@@ -402,7 +402,7 @@ if __name__ == '__main__':
         # train actor
         train_actor = opt.freeze_actor < 0 or cur_iter < opt.freeze_actor
         train_critic = opt.freeze_critic < 0 or cur_iter < opt.freeze_critic
-        for param in costsnet.parameters():
+        for param in disc.parameters():
             param.requires_grad = False  # to avoid computation
         if not train_actor or cur_iter < opt.burnin:
             actor_iters = opt.burnin_actor_iters
@@ -427,7 +427,7 @@ if __name__ == '__main__':
             else:
                 generated = all_generated
             logprobs = all_logprobs.gather(2, generated.unsqueeze(2)).squeeze(2)
-            all_costs, _ = costsnet(all_generated.data)
+            all_costs, _ = disc(all_generated.data)
             all_values = critic(all_generated.data)
             all_costs = all_costs.gather(2, all_generated.unsqueeze(2)).squeeze(2)
             all_returns = Variable(torch.zeros(all_costs.size()).cuda())
@@ -484,9 +484,9 @@ if __name__ == '__main__':
                 print('Generated (last row is real):')
                 task.display(all_generated.data.cpu().numpy())
                 print()
-                print('CostsNet costs (last row is real):')
+                print('Discriminator costs (last row is real):')
                 print(all_costs.data.cpu().numpy(), '\n')
-                print('CostsNet cost sums (last element is real):')
+                print('Discriminator cost sums (last element is real):')
                 print(all_costs.data.cpu().numpy().sum(1), '\n')
                 print('Critic values (last row is real):')
                 print(all_values.data.cpu().numpy(), '\n')
@@ -501,8 +501,8 @@ if __name__ == '__main__':
             extra = []
             if not train_actor:
                 extra.append('actor frozen')
-            if not train_costsnet:
-                extra.append('costsnet frozen')
+            if not train_disc:
+                extra.append('disc frozen')
             if not train_critic:
                 extra.append('critic frozen')
             extra = ', '.join(extra)
@@ -528,13 +528,13 @@ if __name__ == '__main__':
             plt.close()
 
             plot_agnorm.append(np.array(actor_gnorms).mean())
-            plot_cgnorm.append(np.array(costsnet_gnorms).mean())
+            plot_cgnorm.append(np.array(disc_gnorms).mean())
             plot_ctgnorm.append(np.array(critic_gnorms).mean())
             fig = plt.figure()
             plt.plot(x_array, np.array(plot_agnorm), c=colors[0])
             plt.plot(x_array, np.array(plot_cgnorm), c=colors[1])
             plt.plot(x_array, np.array(plot_ctgnorm), c=colors[2])
-            plt.legend(['Actor grad norm', 'CostsNet grad norm', 'Critic grad norm'], loc=2)
+            plt.legend(['Actor grad norm', 'Discriminator grad norm', 'Critic grad norm'], loc=2)
             fig.savefig(opt.save + '/grads.png')
             plt.close()
 
@@ -559,20 +559,20 @@ if __name__ == '__main__':
         if opt.save_every > 0 and cur_iter and cur_iter % opt.save_every == 0:
             print('Saving model...')
             save_actor = opt.save_actor
-            save_costsnet = opt.save_costsnet
+            save_disc = opt.save_disc
             save_critic = opt.save_critic
             if not opt.save_overwrite:
                 save_actor += ('.%d' % cur_iter)
-                save_costsnet += ('.%d' % cur_iter)
+                save_disc += ('.%d' % cur_iter)
                 save_critic += ('.%d' % cur_iter)
             with open(save_actor, 'wb') as f:
                 states = [actor.state_dict(), actor_optimizer.state_dict(), cur_iter]
                 torch.save(states, f)
                 print('Saved actor to', save_actor)
-            with open(save_costsnet, 'wb') as f:
-                states = [costsnet.state_dict(), costsnet_optimizer.state_dict(), cur_iter, buffer]
+            with open(save_disc, 'wb') as f:
+                states = [disc.state_dict(), disc_optimizer.state_dict(), cur_iter, buffer]
                 torch.save(states, f)
-                print('Saved costsnet to', save_costsnet)
+                print('Saved disc to', save_disc)
             with open(save_critic, 'wb') as f:
                 states = [critic.state_dict(), critic_optimizer.state_dict(), cur_iter]
                 torch.save(states, f)
