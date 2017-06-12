@@ -95,9 +95,10 @@ def gradient_norm(parameters, norm_type=2):
 
 
 class Task(object):
-    def __init__(self, seq_len, vocab_size):
+    def __init__(self, seq_len, vocab_size, inf_horizon=True):
         self.seq_len = seq_len
         self.vocab_size = vocab_size
+        self.inf_horizon = inf_horizon
 
     def get_data(self):
         '''Get a batch of data'''
@@ -277,7 +278,7 @@ class WordsTask(Task):
 
 class LongtermTask(Task):
     def __init__(self, seq_len, vocab_size):
-        super(LongtermTask, self).__init__(seq_len, vocab_size)
+        super(LongtermTask, self).__init__(seq_len, vocab_size, inf_horizon=False)
 
     def get_data(self, batch_size):
         '''Generate simple toy training data where two tokens appear separated by large number

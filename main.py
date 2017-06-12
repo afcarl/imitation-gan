@@ -447,6 +447,7 @@ if __name__ == '__main__':
                 #       possible solution: for infinite length episodes (like perhaps language
                 #                          modeling), use value of the final state as an
                 #                          approximation, even if we never train that value.
+                #                          use task.inf_horizon
                 all_returns = all_returns + (cur_costs * (opt.gamma ** ret_i))
             if opt.reward_steps > 0:
                 cur_values = torch.cat([all_values[:, opt.reward_steps:],
