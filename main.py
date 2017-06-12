@@ -187,11 +187,13 @@ if __name__ == '__main__':
                         help='minimum policy entropy regularization')
     parser.add_argument('--disc_entropy_reg', type=float, default=0.0,  # <= 1e-3
                         help='disc entropy regularization')
-    # TODO add gamma_inc. gamma=0 is useful to get immediate reward signal in the beginning, where
+    parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
+    # TODO gamma=0 is useful to get immediate reward signal in the beginning, where
     #      the policy is not well-trained. once the policy is trained to a certain extent, we can
     #      increase gamma to consider future rewards in the horizon as well. doing so is like
     #      averaging the costs across timesteps to get a less noisy cost for the current timestep.
-    parser.add_argument('--gamma', type=float, default=1.0, help='discount factor')
+    parser.add_argument('--gamma_inc', type=float, default=0.0,
+                        help='increase gamma by this amount every turn')
     parser.add_argument('--reward_steps', type=int, default=1,
                         help='Number of rewards before critic value for Q estimation')
     parser.add_argument('--smooth_zero', type=float, default=2e-3,  # 1e-2 for larger tasks
@@ -250,6 +252,7 @@ if __name__ == '__main__':
     if not opt.save_critic:
         opt.save_critic = opt.save + '/critic.model'
     train_log = open(opt.save + '/train.log', 'w')
+    gamma = opt.gamma
     colors = cm.rainbow(np.linspace(0, 1, 3))
     plot_r = []
     plot_f = []
@@ -448,14 +451,14 @@ if __name__ == '__main__':
                 #                          modeling), use value of the final state as an
                 #                          approximation, even if we never train that value.
                 #                          use task.inf_horizon
-                all_returns = all_returns + (cur_costs * (opt.gamma ** ret_i))
+                all_returns = all_returns + (cur_costs * (gamma ** ret_i))
             if opt.reward_steps > 0:
                 cur_values = torch.cat([all_values[:, opt.reward_steps:],
                                         Variable(torch.zeros([all_values.size(0),
                                                               opt.reward_steps]).cuda())], 1)
             else:
                 cur_values = all_values
-            all_returns = all_returns + (cur_values * (opt.gamma ** opt.reward_steps))
+            all_returns = all_returns + (cur_values * (gamma ** opt.reward_steps))
             all_disadv = all_returns - all_values
             if print_generated:
                 disadv = all_disadv[:-1]
@@ -513,7 +516,7 @@ if __name__ == '__main__':
             extra = ', '.join(extra)
             print(cur_iter, ':\tWdist:', np.array(Wdists).mean(), '\terr R:',
                   np.array(err_r).mean(), '\terr F:', np.array(err_f).mean(), '\tentropy_reg:',
-                  entropy_reg, '\tsolved:', solved, '\tsolved_fail:', solved_fail,
+                  entropy_reg, '\tgamma:', gamma, '\tsolved:', solved, '\tsolved_fail:', solved_fail,
                   '\t[' + extra + ']')
             train_log.write('%.4f\t%.4f\t%.4f\n' % (np.array(Wdists).mean(), np.array(err_r).mean(),
                             np.array(err_f).mean()))
@@ -542,6 +545,9 @@ if __name__ == '__main__':
             plt.legend(['Actor grad norm', 'Discriminator grad norm', 'Critic grad norm'], loc=2)
             fig.savefig(opt.save + '/grads.png')
             plt.close()
+
+        # increment gamma
+        gamma = min(1.0, gamma + opt.gamma_inc)
 
         params = [None]
         if opt.task == 'longterm':
